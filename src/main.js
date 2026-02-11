@@ -12,9 +12,18 @@ const TEAM = [
 // Fecha de inicio de la rotación (debe ser un lunes)
 const START_DATE = new Date('2026-02-09');
 
-const DAYS_ES = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes'];
+const DAYS_ES = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie'];
 
 // --- LÓGICA DE NEGOCIO ---
+
+// Cargar overrides del localStorage
+let overrides = JSON.parse(localStorage.getItem('isla_bonita_overrides')) || {};
+
+function saveOverride(dateString, personId) {
+  overrides[dateString] = personId;
+  localStorage.setItem('isla_bonita_overrides', JSON.stringify(overrides));
+  render(); // Re-renderizar para mostrar cambios
+}
 
 function getWeekNumber(date) {
   const diffTime = Math.abs(date - START_DATE);
@@ -23,6 +32,14 @@ function getWeekNumber(date) {
 }
 
 function getHomeOfficePerson(date) {
+  const dateStr = date.toISOString().split('T')[0];
+
+  // 1. Revisar si hay un override manual para este día
+  if (overrides[dateStr]) {
+    return TEAM.find(p => p.id === overrides[dateStr]);
+  }
+
+  // 2. Si no, calcular rotación normal
   let dayIndex = date.getDay() - 1; // 0=Mon, 4=Fri
   if (dayIndex < 0 || dayIndex > 4) return null; // Fines de semana
 
@@ -44,6 +61,8 @@ function getWeekDays(date) {
     d.setDate(startOfWeek.getDate() + i);
     days.push({
       date: d,
+      dateStr: d.toISOString().split('T')[0],
+      dayNum: d.getDate(),
       person: getHomeOfficePerson(d),
       isToday: d.toDateString() === new Date().toDateString()
     });
@@ -54,13 +73,22 @@ function getWeekDays(date) {
 // --- RENDERIZADO ---
 
 const app = document.querySelector('#app');
+let selectedDayToSwap = null; // Guardar qué día se quiere cambiar
 
 function render() {
   const now = new Date();
   const weekDays = getWeekDays(now);
   const todayPerson = getHomeOfficePerson(now);
+
+  // Calcular mañana
   const tomorrow = new Date(now);
   tomorrow.setDate(now.getDate() + 1);
+  // Si mañana es sábado, saltar al lunes
+  if (tomorrow.getDay() === 6) {
+    tomorrow.setDate(tomorrow.getDate() + 2);
+  } else if (tomorrow.getDay() === 0) {
+    tomorrow.setDate(tomorrow.getDate() + 1);
+  }
   const tomorrowPerson = getHomeOfficePerson(tomorrow);
 
   app.innerHTML = `
@@ -83,8 +111,8 @@ function render() {
         
         <div class="week-grid">
           ${weekDays.map(day => `
-            <div class="day-cell ${day.isToday ? 'active' : ''}">
-              <span class="day-name">${DAYS_ES[day.date.getDay() - 1].substring(0, 3)}</span>
+            <div class="day-cell ${day.isToday ? 'active' : ''}" onclick="openSwapDialog('${day.dateStr}')">
+              <span class="day-name">${DAYS_ES[day.date.getDay() - 1]} ${day.dayNum}</span>
               <div class="user-avatar" style="${day.isToday ? '' : 'color: ' + day.person.color}">
                 ${day.person.initial}
               </div>
@@ -94,27 +122,27 @@ function render() {
       </div>
 
       <div class="info-section">
-        <div class="card">
+        <div class="card big-card">
           <div class="icon-box bg-palm">🏠</div>
           <div class="card-content">
-            <h3>Hoy le toca a:</h3>
-            <p>${todayPerson ? todayPerson.name : 'Nadie (descanso)'}</p>
+            <h3 class="label-small">Hoy le toca a:</h3>
+            <p class="name-big">${todayPerson ? todayPerson.name : 'Nadie'}</p>
           </div>
         </div>
 
-        <div class="card">
+        <div class="card big-card">
           <div class="icon-box bg-sea">🌅</div>
           <div class="card-content">
-            <h3>Mañana le toca:</h3>
-            <p>${tomorrowPerson ? tomorrowPerson.name : 'Nadie (descanso)'}</p>
+            <h3 class="label-small">Mañana le toca:</h3>
+            <p class="name-big">${tomorrowPerson ? tomorrowPerson.name : 'Nadie'}</p>
           </div>
         </div>
 
-        <div class="card" id="btn-swap">
-          <div class="icon-box bg-sun">🔄</div>
+        <div class="card" id="btn-swap-info" style="opacity: 0.7;">
+          <div class="icon-box bg-sun">💡</div>
           <div class="card-content">
-            <h3>Intercambiar Día</h3>
-            <p>Toca para negociar un cambio</p>
+          <h3>Tip:</h3>
+          <p>Toca un día en el calendario arriba para cambiar quién hace Home Office.</p>
           </div>
         </div>
       </div>
@@ -127,22 +155,36 @@ function render() {
 
     <div id="swap-modal" class="swap-modal">
       <div class="modal-content">
-        <h2 class="modal-title">¿Con quién cambias?</h2>
+        <h2 class="modal-title">Asignar día a:</h2>
         <div class="team-list">
           ${TEAM.map(member => `
-            <div class="team-item">
+            <div class="team-item" onclick="confirmSwap(${member.id})">
               <div class="user-avatar" style="color: ${member.color}">${member.initial}</div>
               <span>${member.name}</span>
             </div>
           `).join('')}
         </div>
-        <button id="close-modal" style="margin-top: 20px; width: 100%; padding: 10px; border: none; background: #eee; border-radius: 12px;">Cancelar</button>
+        <button id="close-modal" style="margin-top: 20px; width: 100%; padding: 10px; border: none; background: #eee; border-radius: 12px; font-weight: 600;">Cancelar</button>
       </div>
     </div>
   `;
 
   setupEventListeners();
 }
+
+// Funciones globales para onclick
+window.openSwapDialog = (dateStr) => {
+  selectedDayToSwap = dateStr;
+  document.querySelector('#swap-modal').style.display = 'flex';
+};
+
+window.confirmSwap = (personId) => {
+  if (selectedDayToSwap) {
+    saveOverride(selectedDayToSwap, personId);
+    selectedDayToSwap = null;
+    document.querySelector('#swap-modal').style.display = 'none';
+  }
+};
 
 function setupEventListeners() {
   // PWA Install Logic
@@ -168,15 +210,8 @@ function setupEventListeners() {
   }
 
   // Modal Logic
-  const btnSwap = document.querySelector('#btn-swap');
   const modal = document.querySelector('#swap-modal');
   const closeModal = document.querySelector('#close-modal');
-
-  if (btnSwap) {
-    btnSwap.addEventListener('click', () => {
-      modal.style.display = 'flex';
-    });
-  }
 
   if (closeModal) {
     closeModal.addEventListener('click', () => {
