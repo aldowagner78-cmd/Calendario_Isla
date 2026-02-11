@@ -1,5 +1,6 @@
 import './style.css'
 import { isHoliday, getBirthday } from './holidays.js';
+import { saveOverrideRemote, getOverridesRemote, subscribeOverrides } from './firebase.js';
 
 // --- CONFIGURACIÓN DEL EQUIPO ---
 const TEAM = [
@@ -21,14 +22,41 @@ let currentViewDate = new Date(); // Fecha que se está visualizando
 
 // --- LÓGICA DE NEGOCIO (CORE) ---
 
-// Cargar overrides del localStorage
-let overrides = JSON.parse(localStorage.getItem('isla_bonita_overrides')) || {};
+// Cargar overrides desde Firebase
+let overrides = {};
+let isLoadingOverrides = true;
 
-function saveOverride(dateString, personId) {
-  overrides[dateString] = personId;
-  localStorage.setItem('isla_bonita_overrides', JSON.stringify(overrides));
-  scheduleCache = null; // Invalidar cache al cambiar override
+// Inicializar Firebase y cargar overrides
+(async () => {
+  try {
+    overrides = await getOverridesRemote();
+  } catch (e) {
+    console.error('Error cargando overrides:', e);
+  }
+  isLoadingOverrides = false;
   render();
+  
+  // Suscribirse a cambios en tiempo real
+  subscribeOverrides(async () => {
+    try {
+      overrides = await getOverridesRemote();
+      scheduleCache = null;
+      render();
+    } catch (e) {
+      console.error('Error sincronizando:', e);
+    }
+  });
+})();
+
+async function saveOverride(dateString, personId) {
+  overrides[dateString] = personId;
+  scheduleCache = null;
+  render();
+  try {
+    await saveOverrideRemote(dateString, personId);
+  } catch (e) {
+    console.error('Error guardando override:', e);
+  }
 }
 
 // Verifica si es día laboral (Lun-Vie y NO es feriado)
@@ -429,9 +457,9 @@ window.openSwapDialog = (dateStr) => {
   document.querySelector('#swap-modal').style.display = 'flex';
 };
 
-window.confirmSwap = (personId) => {
+window.confirmSwap = async (personId) => {
   if (selectedDayToSwap) {
-    saveOverride(selectedDayToSwap, personId);
+    await saveOverride(selectedDayToSwap, personId);
     selectedDayToSwap = null;
     document.querySelector('#swap-modal').style.display = 'none';
   }
@@ -488,10 +516,12 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-try {
-  render();
-} catch (e) {
-  console.error('Error al renderizar:', e);
-  document.querySelector('#app').innerHTML = '<p style="padding:20px;text-align:center;">Error al cargar. Recargá la página.</p>';
+// Mostrar loading mientras se carga Firebase
+if (isLoadingOverrides) {
+  try {
+    document.querySelector('#app').innerHTML = '<div style="padding:40px;text-align:center;"><div style="font-size:2rem;margin-bottom:10px;">🌴</div><p>Cargando...</p></div>';
+  } catch (e) {
+    console.error('Error inicial:', e);
+  }
 }
 // setInterval(render, 1000 * 60 * 60);
