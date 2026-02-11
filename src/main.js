@@ -1,5 +1,6 @@
 import './style.css'
 import { isHoliday, getBirthday } from './holidays.js';
+import { getOverridesRemote, saveOverrideRemote, subscribeOverrides } from './firebase.js';
 
 // --- CONFIGURACIÓN DEL EQUIPO ---
 const TEAM = [
@@ -17,8 +18,9 @@ const DAYS_ES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes'
 const MONTHS_ES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
 // --- ESTADO DE LA APLICACIÓN ---
-let currentViewDate = new Date(); // Fecha que se está visualizando
+let currentViewDate = new Date();
 let darkMode = localStorage.getItem('isla_bonita_dark_mode') === 'true';
+let isAdmin = localStorage.getItem('isla_bonita_admin') === 'true';
 
 // Aplicar modo oscuro al inicio
 if (darkMode) {
@@ -34,32 +36,62 @@ function toggleDarkMode() {
 
 // --- LÓGICA DE NEGOCIO (CORE) ---
 
-// Cargar overrides del localStorage
-let overrides = JSON.parse(localStorage.getItem('isla_bonita_overrides')) || {};
+// Overrides ahora vienen de Firebase
+let overrides = {};
+let isLoadingOverrides = true;
 
-function saveOverride(dateString, personId) {
-  overrides[dateString] = personId;
-  localStorage.setItem('isla_bonita_overrides', JSON.stringify(overrides));
-
-  // Notificación Local
-  const person = TEAM.find(p => p.id === personId);
-  const [year, month, day] = dateString.split('-'); // YYYY-MM-DD
-  const dateObj = new Date(year, month - 1, day);
-  const dayName = DAYS_ES[dateObj.getDay()];
-
-  if (person) {
-    showLocalNotification(`Cambio confirmado: ${person.name} toma el ${dayName} ${day}`);
+// Cargar overrides iniciales y suscribirse
+(async () => {
+  try {
+    overrides = await getOverridesRemote();
+    isLoadingOverrides = false;
+    render();
+  } catch (e) {
+    console.error('Error cargando overrides de Firebase:', e);
+    // Fallback a LocalStorage si falla Firebase
+    overrides = JSON.parse(localStorage.getItem('isla_bonita_overrides')) || {};
+    isLoadingOverrides = false;
+    render();
   }
+})();
 
-  render();
+subscribeOverrides(async () => {
+  try {
+    const newOverrides = await getOverridesRemote();
+    if (JSON.stringify(newOverrides) !== JSON.stringify(overrides)) {
+      overrides = newOverrides;
+      showLocalNotification('🔄 Calendario actualizado remotamente');
+      render();
+    }
+  } catch (e) { console.error(e); }
+});
+
+
+async function saveOverride(dateString, personId) {
+  // Guardar en Firebase
+  try {
+    await saveOverrideRemote(dateString, personId);
+
+    // Optimista: Actualizar local mientras llega la confirmación
+    overrides[dateString] = personId;
+    render();
+
+    const person = TEAM.find(p => p.id === personId);
+    if (person) {
+      showLocalNotification(`Cambio guardado: ${person.name}`);
+    }
+  } catch (e) {
+    showLocalNotification('❌ Error al guardar en la nube');
+    console.error(e);
+  }
 }
 
 function showLocalNotification(msg) {
-  // 1. Notificación Visual (Toast) - Siempre
+  // Toast
   const toast = document.createElement('div');
   toast.innerText = msg;
   toast.style.position = 'fixed';
-  toast.style.bottom = '80px'; // Encima del banner
+  toast.style.bottom = '80px';
   toast.style.left = '50%';
   toast.style.transform = 'translateX(-50%)';
   toast.style.background = 'var(--palm)';
@@ -70,24 +102,8 @@ function showLocalNotification(msg) {
   toast.style.zIndex = '10000';
   toast.style.fontSize = '0.9rem';
   toast.style.fontWeight = '600';
-  toast.style.textAlign = 'center';
-  toast.style.minWidth = '280px';
-
   document.body.appendChild(toast);
   setTimeout(() => toast.remove(), 4000);
-
-  // 2. Notificación del Navegador (Si se permite)
-  if (!('Notification' in window)) return;
-
-  if (Notification.permission === 'granted') {
-    new Notification('Isla Bonita', { body: msg, icon: 'logo.svg' });
-  } else if (Notification.permission !== 'denied') {
-    Notification.requestPermission().then(permission => {
-      if (permission === 'granted') {
-        new Notification('Isla Bonita', { body: msg, icon: 'logo.svg' });
-      }
-    });
-  }
 }
 
 // Verifica si es día laboral (Lun-Vie y NO es feriado)
@@ -121,8 +137,8 @@ function getWorkingDayIndex(targetDate) {
 function getHomeOfficePerson(date) {
   const dateStr = date.toISOString().split('T')[0];
 
-  // 1. Revisar si hay un override manual
-  if (overrides[dateStr]) {
+  // 1. Revisar override
+  if (overrides && overrides[dateStr]) {
     return TEAM.find(p => p.id === overrides[dateStr]);
   }
 
@@ -179,6 +195,23 @@ function goToToday() {
   render();
 }
 
+// --- SEGURIDAD (ADMIN MODE SIMPLE) ---
+async function verifyAdmin() {
+  if (isAdmin) return true;
+
+  const pin = prompt("🔒 Modo Admin\nIngresa el PIN de seguridad:");
+  // PIN Hardcodeado simple para Aldo. 
+  if (pin === '1234') {
+    isAdmin = true;
+    localStorage.setItem('isla_bonita_admin', 'true');
+    showLocalNotification('🔓 Modo Admin Activado');
+    return true;
+  } else {
+    alert("PIN Incorrecto");
+    return false;
+  }
+}
+
 // --- RENDERIZADO ---
 
 const app = document.querySelector('#app');
@@ -187,10 +220,7 @@ let selectedDayToSwap = null;
 function render() {
   const now = new Date(new Date().setHours(0, 0, 0, 0));
 
-  // Usar currentViewDate para la grilla
   const weekDays = getWeekDays(currentViewDate);
-
-  // Info cards siempre muestran Hoy/Mañana REALES
   const todayPerson = getHomeOfficePerson(now);
 
   const tomorrow = new Date(now);
@@ -200,7 +230,6 @@ function render() {
 
   const tomorrowPerson = getHomeOfficePerson(tomorrow);
 
-  // Título de la semana
   const weekMonth = MONTHS_ES[weekDays[0].date.getMonth()];
   const weekYear = weekDays[0].date.getFullYear();
 
@@ -250,6 +279,8 @@ function render() {
     }
               
               ${day.birthday ? `<div style="font-size: 0.5rem; color: #D81B60; font-weight: 700; margin-top: 2px;">Cumple</div>` : ''}
+              
+              ${overrides[day.dateStr] ? '<div style="font-size: 0.5rem; margin-top: 1px;">✏️</div>' : ''}
             </div>
           `).join('')}
         </div>
@@ -277,7 +308,7 @@ function render() {
           <div class="icon-box bg-sun">💡</div>
           <div class="card-content">
             <h3>Tip:</h3>
-            <p>Toca un día en el calendario para cambiar.</p>
+            <p>Toca un día en el calendario para cambiar (Admin).</p>
           </div>
         </div>
       </div>
@@ -304,6 +335,10 @@ function render() {
     </div>
   `;
 
+  if (isLoadingOverrides) {
+    // Spinner logic placeholder
+  }
+
   setupEventListeners();
 }
 
@@ -325,9 +360,13 @@ function isCurrentWeek(date) {
 }
 
 
-window.openSwapDialog = (dateStr) => {
-  selectedDayToSwap = dateStr;
-  document.querySelector('#swap-modal').style.display = 'flex';
+window.openSwapDialog = async (dateStr) => {
+  // VERIFICAR ADMIN ANTES DE ABRIR
+  const isAuthorized = await verifyAdmin();
+  if (isAuthorized) {
+    selectedDayToSwap = dateStr;
+    document.querySelector('#swap-modal').style.display = 'flex';
+  }
 };
 
 window.confirmSwap = (personId) => {
@@ -389,4 +428,4 @@ if ('Notification' in window && Notification.permission !== 'granted' && Notific
   Notification.requestPermission();
 }
 
-render();
+render(); // render inicial
