@@ -146,9 +146,17 @@ function getHomeOfficePerson(date) {
   // 2. Revisar si es fin de semana o feriado
   if (!isWorkingDay(date)) return null;
 
-  // 3. Calcular rotación basada en días hábiles acumulados
+  // 3. Calcular rotación con desplazamiento semanal
+  // Lógica: Cada semana la rotación se desplaza -1 (El que estaba el Viernes pasa al Lunes)
   const workingDayIndex = getWorkingDayIndex(date);
-  const personIndex = workingDayIndex % 5;
+
+  // Calcular semanas pasadas desde el inicio para el shift
+  const diffTime = date.getTime() - START_DATE.getTime();
+  const weeksDiff = Math.floor(diffTime / (7 * 24 * 60 * 60 * 1000));
+
+  // Fórmula: (IndiceDiaLaboral - SemanasTranscurridas) % 5
+  // Usamos lógica de módulo positivo para evitar negativos
+  const personIndex = ((workingDayIndex - weeksDiff) % 5 + 5) % 5;
 
   return TEAM[personIndex];
 }
