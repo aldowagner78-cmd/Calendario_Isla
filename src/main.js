@@ -2,7 +2,7 @@ import './style.css'
 import { isHoliday, getBirthday } from './holidays.js';
 import { getOverridesRemote, saveOverrideRemote, subscribeOverrides } from './firebase.js';
 
-// --- CONFIGURACIÓN DEL EQUIPO ---
+// --- CONFIGURACIÓN ---
 const TEAM = [
   { id: 1, name: 'Machi', color: '#26C6DA', initial: 'M' },   // Cyan
   { id: 2, name: 'Fabi', color: '#7E57C2', initial: 'F' },    // Deep Purple
@@ -11,50 +11,30 @@ const TEAM = [
   { id: 5, name: 'Aldo', color: '#66BB6A', initial: 'A' }     // Green
 ];
 
-// Fecha de inicio de la rotación (Lunes 9 de Feb 2026)
-// El orden inicial es implícito en el TEAM array (0..4)
 const START_DATE = new Date('2026-02-09T00:00:00');
 
 const DAYS_ES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
 const MONTHS_ES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
-// --- ESTADO DE LA APLICACIÓN ---
+// --- ESTADO ---
 let currentViewDate = new Date();
-let currentMonthViewDate = new Date(); // Estado independiente para el calendario mensual
+let currentMonthViewDate = new Date();
 let darkMode = localStorage.getItem('isla_bonita_dark_mode') === 'true';
 let isAdmin = localStorage.getItem('isla_bonita_admin') === 'true';
 
-// Aplicar modo oscuro al inicio
-if (darkMode) {
-  document.body.classList.add('dark-mode');
-}
+if (darkMode) document.body.classList.add('dark-mode');
 
-function toggleDarkMode() {
-  darkMode = !darkMode;
-  document.body.classList.toggle('dark-mode', darkMode);
-  localStorage.setItem('isla_bonita_dark_mode', darkMode);
-  render();
-}
-
-// --- LÓGICA DE NEGOCIO (CORE) ---
-
-// Overrides ahora vienen de Firebase
+// --- OVERRIDES ---
 let overrides = {};
-let isLoadingOverrides = true;
-let simulationCache = {}; // Cache de asignaciones { 'YYYY-MM-DD': personId }
+let simulationCache = {};
 
-// Cargar overrides iniciales y suscribirse
 (async () => {
   try {
     overrides = await getOverridesRemote();
-    isLoadingOverrides = false;
-    runSimulation(); // Recalcular todo al cargar overrides
+    runSimulation(); // Recalcular
     render();
   } catch (e) {
-    console.error('Error cargando overrides de Firebase:', e);
-    // Fallback a LocalStorage si falla Firebase
     overrides = JSON.parse(localStorage.getItem('isla_bonita_overrides')) || {};
-    isLoadingOverrides = false;
     runSimulation();
     render();
   }
@@ -65,224 +45,184 @@ subscribeOverrides(async () => {
     const newOverrides = await getOverridesRemote();
     if (JSON.stringify(newOverrides) !== JSON.stringify(overrides)) {
       overrides = newOverrides;
-      simulationCache = {}; // Limpiar cache para forzar recalculo
       runSimulation();
       showLocalNotification('🔄 Calendario actualizado remotamente');
       render();
     }
-  } catch (e) { console.error(e); }
+  } catch (e) { }
 });
 
-
 async function saveOverride(dateString, personId) {
-  // Guardar en Firebase
   try {
     await saveOverrideRemote(dateString, personId);
-
-    // Optimista: Actualizar local mientras llega la confirmación
     overrides[dateString] = personId;
-    simulationCache = {}; // Invalidar simulación
-    runSimulation(); // Recalcular futuro con este cambio
+    runSimulation();
     render();
-
-    const person = TEAM.find(p => p.id === personId);
-    if (person) {
-      showLocalNotification(`Cambio guardado: ${person.name}`);
-    }
+    showLocalNotification('Cambio guardado');
   } catch (e) {
-    showLocalNotification('❌ Error al guardar en la nube');
-    console.error(e);
+    showLocalNotification('❌ Error al guardar');
   }
 }
 
+// --- UTILIDADES ---
+function isWorkingDay(date) {
+  const day = date.getDay();
+  if (day === 0 || day === 6) return false;
+  return !isHoliday(date);
+}
+
 function showLocalNotification(msg) {
-  // Toast
   const toast = document.createElement('div');
   toast.innerText = msg;
-  toast.style.position = 'fixed';
-  toast.style.bottom = '80px';
-  toast.style.left = '50%';
-  toast.style.transform = 'translateX(-50%)';
-  toast.style.background = 'var(--palm)';
-  toast.style.color = 'var(--sand)';
-  toast.style.padding = '12px 24px';
-  toast.style.borderRadius = '50px';
-  toast.style.boxShadow = '0 4px 12px var(--shadow)';
-  toast.style.zIndex = '10000';
-  toast.style.fontSize = '0.9rem';
-  toast.style.fontWeight = '600';
+  Object.assign(toast.style, {
+    position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)',
+    background: 'var(--palm)', color: 'var(--sand)', padding: '12px 24px',
+    borderRadius: '50px', boxShadow: '0 4px 12px var(--shadow)', zIndex: '10000',
+    fontSize: '0.9rem', fontWeight: '600'
+  });
   document.body.appendChild(toast);
   setTimeout(() => toast.remove(), 4000);
 }
 
-// Verifica si es día laboral (Lun-Vie y NO es feriado)
-function isWorkingDay(date) {
-  const day = date.getDay();
-  if (day === 0 || day === 6) return false; // Finde
-  return !isHoliday(date);
-}
+// ==========================================
+// === ALGORITMO DE SIMULACIÓN (VTO USER) ===
+// ==========================================
 
-// --- SIMULACIÓN DE EQUIDAD MENSUAL ---
-// Esta es la "magia" para asegurar que nadie tenga 5 días si otro tiene 3.
 function runSimulation() {
   simulationCache = {};
 
-  // Empezamos desde un día antes del inicio para tener un "lastIndex" inicial
-  // Asumimos que antes del inicio terminamos en el último del array (Aldo), para que empiece Machi.
-  let lastPersonIndex = TEAM.length - 1;
+  let state = {
+    lastAssignedIndex: TEAM.length - 1,   // Último asignado (para rotación simple)
+    pendingFridayUserIndex: -1,           // Quién tuvo el último viernes (para continuidad)
+    monthlyCounts: {},
+    currentMonth: -1
+  };
 
-  // Simulamos hasta 2 años en el futuro para cubrir cualquier vista
+  // Inicializar contadores
+  TEAM.forEach(p => state.monthlyCounts[p.id] = 0);
+
+  // Simulamos hasta 2 años
   const endDate = new Date(START_DATE);
   endDate.setFullYear(endDate.getFullYear() + 2);
 
   let currentDate = new Date(START_DATE);
   currentDate.setHours(0, 0, 0, 0);
 
-  // Estado del mes actual
-  let currentMonthStr = "";
-  let monthlyCounts = {}; // { personId: count }
-
   while (currentDate <= endDate) {
     const dateStr = currentDate.toISOString().split('T')[0];
-    const monthStr = dateStr.substring(0, 7); // YYYY-MM
+    const month = currentDate.getMonth();
 
-    // Detectar cambio de mes: Reiniciar contadores equidad
-    if (monthStr !== currentMonthStr) {
-      currentMonthStr = monthStr;
-      monthlyCounts = {};
-      TEAM.forEach(p => monthlyCounts[p.id] = 0);
+    // 1. Cambio de mes: Reiniciar contadores
+    if (month !== state.currentMonth) {
+      TEAM.forEach(p => state.monthlyCounts[p.id] = 0);
+      state.currentMonth = month;
     }
 
-    // Si no trabajamos, saltamos (pero mantenemos el lastPersonIndex para continuidad)
-    // No, los feriados/findes no se asignan.
+    // 2. Si es día laboral
     if (isWorkingDay(currentDate)) {
+      let assignedPersonIndex = -1;
 
-      let assignedPersonId = null;
-
-      // 1. CHEQUEAR OVERRIDE (Fuerza Mayor)
+      // A. Override (Fuerza Mayor)
       if (overrides[dateStr]) {
-        assignedPersonId = overrides[dateStr];
-        // Actualizar índice para que la rotación continúe desde este si es posible
-        const idx = TEAM.findIndex(p => p.id === assignedPersonId);
-        if (idx >= 0) lastPersonIndex = idx;
-
+        assignedPersonIndex = TEAM.findIndex(p => p.id === overrides[dateStr]);
       } else {
-        // 2. ALGORITMO DE EQUIDAD + CONTINUIDAD
+        // B. Selección de Candidato
 
-        // Candidatos: Aquellos con el MÍNIMO de días asignados este mes
-        const minCount = Math.min(...Object.values(monthlyCounts));
-        const candidates = TEAM.filter(p => monthlyCounts[p.id] === minCount);
-
-        // De los candidatos, ¿cuál es el "Siguiente Lógico" en la rotación?
-        // El siguiente lógico es (last + 1) % 5
-        const naturalNextIndex = (lastPersonIndex + 1) % TEAM.length;
-        const naturalNextPerson = TEAM[naturalNextIndex];
-
-        // ¿Está el "Siguiente Lógico" entre los candidatos justos?
-        const isNaturalCandidate = candidates.some(c => c.id === naturalNextPerson.id);
-
-        if (isNaturalCandidate) {
-          // ¡Perfecto! El orden natural respeta la equidad.
-          assignedPersonId = naturalNextPerson.id;
-          lastPersonIndex = naturalNextIndex;
+        // Regla 2: Continuidad (Con corrección de feriados: usamos pendingFridayUserIndex)
+        // Si hay alguien pendiente del viernes anterior, es el candidato prioritario.
+        if (state.pendingFridayUserIndex !== -1) {
+          assignedPersonIndex = state.pendingFridayUserIndex;
         } else {
-          // Conflicto: El orden natural rompería la equidad (ya tiene muchos días).
-          // Debemos elegir a otro de los candidatos (el "más cercano" en rotación).
-          // Buscamos el primer candidato avanzando en la lista desde naturalNext
-          let bestCandidate = candidates[0]; // Fallback
+          // Regla 3: Rotación Simple
+          assignedPersonIndex = (state.lastAssignedIndex + 1) % TEAM.length;
+        }
 
-          for (let i = 0; i < TEAM.length; i++) {
-            const idx = (naturalNextIndex + i) % TEAM.length;
-            const p = TEAM[idx];
-            if (candidates.some(c => c.id === p.id)) {
-              bestCandidate = p;
-              lastPersonIndex = idx;
-              break;
-            }
-          }
-          assignedPersonId = bestCandidate.id;
+        // Regla 1: EQUIDAD MENSUAL (GOLDEN RULE)
+        // Verificamos si asignar al candidato rompe la equidad (Max - Min > 1)
+        assignedPersonIndex = applyEquityRule(assignedPersonIndex, state.monthlyCounts);
+      }
+
+      // C. Confirmar Asignación
+      if (assignedPersonIndex !== -1) {
+        const person = TEAM[assignedPersonIndex];
+
+        // Guardar
+        simulationCache[dateStr] = person.id;
+        state.monthlyCounts[person.id]++;
+        state.lastAssignedIndex = assignedPersonIndex;
+
+        // Gestión del Viernes
+        if (currentDate.getDay() === 5) { // Viernes
+          state.pendingFridayUserIndex = assignedPersonIndex;
+        } else {
+          // Si asignamos un Lunes (o Martes post-feriado), consumimos el pendiente
+          state.pendingFridayUserIndex = -1;
         }
       }
-
-      // Guardar asignación y actualizar contadores
-      if (assignedPersonId) {
-        simulationCache[dateStr] = assignedPersonId;
-        monthlyCounts[assignedPersonId]++;
-      }
     }
 
-    // Avanzar un día
+    // Avanzar
     currentDate.setDate(currentDate.getDate() + 1);
   }
 }
 
-// Función principal de acceso (ahora lee de la simulación)
+// Helper: Aplica Regla de Equidad (Max - Min <= 1)
+function applyEquityRule(candidateIndex, counts) {
+  const candidateId = TEAM[candidateIndex].id;
+
+  // Proyección
+  const projectedCounts = { ...counts };
+  projectedCounts[candidateId]++;
+
+  const values = Object.values(projectedCounts);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+
+  // SI SE ROMPE LA EQUIDAD
+  if ((max - min) > 1) {
+    // Buscar reemplazo: Alguien que tenga el mínimo actual
+    // (Priorizamos el primero en la lista para simplificar, según lógica de User)
+    const currentMin = Math.min(...Object.values(counts));
+    const replacementIndex = TEAM.findIndex(p => counts[p.id] === currentMin);
+    return replacementIndex;
+  }
+
+  return candidateIndex;
+}
+
 function getHomeOfficePerson(date) {
   const dateStr = date.toISOString().split('T')[0];
-
-  // 0. Guardas básicas
-  if (date < START_DATE) return null;
+  if (date < START_DATE) return null; // Pasado vacío
   if (!isWorkingDay(date)) return null;
 
-  // 1. Si no hay cache (primera carga o error), correr simulación
-  if (Object.keys(simulationCache).length === 0) {
-    runSimulation();
-  }
+  if (Object.keys(simulationCache).length === 0) runSimulation();
 
-  // 2. Leer de cache
   const personId = simulationCache[dateStr];
-  if (personId) {
-    return TEAM.find(p => p.id === personId);
-  }
-
-  return null;
+  return personId ? TEAM.find(p => p.id === personId) : null;
 }
 
-function getWeekDays(date) {
-  const startOfWeek = new Date(date);
-  startOfWeek.setHours(0, 0, 0, 0);
-  const day = startOfWeek.getDay(); // 0 (Dom) - 6 (Sab)
-
-  // Ajustar al Lunes de la semana actual
-  const diff = startOfWeek.getDate() - day + (day === 0 ? -6 : 1);
-  startOfWeek.setDate(diff);
-
-  const days = [];
-  for (let i = 0; i < 5; i++) {
-    const d = new Date(startOfWeek);
-    d.setDate(startOfWeek.getDate() + i);
-    days.push({
-      date: d,
-      dateStr: d.toISOString().split('T')[0],
-      dayNum: d.getDate(),
-      person: getHomeOfficePerson(d),
-      isHoliday: isHoliday(d),
-      birthday: getBirthday(d), // Chequear si es cumple
-      isToday: d.toDateString() === new Date().toDateString()
-    });
-  }
-  return days;
+// --- RENDER ---
+function getMonthlyStats(days) {
+  const stats = {};
+  TEAM.forEach(t => stats[t.id] = 0);
+  days.forEach(day => {
+    if (day && day.person && !day.isHoliday && day.date.getDay() !== 0 && day.date.getDay() !== 6) {
+      stats[day.person.id]++;
+    }
+  });
+  return TEAM.map(t => ({ ...t, count: stats[t.id] })).sort((a, b) => b.count - a.count);
 }
 
-// --- NHELPER CALENDARIO MENSUAL ---
 function getMonthDays(date) {
   const year = date.getFullYear();
   const month = date.getMonth();
-
   const firstDay = new Date(year, month, 1);
   const lastDay = new Date(year, month + 1, 0);
-
   const daysInMonth = lastDay.getDate();
-  const startDayOfWeek = firstDay.getDay(); // 0 (Dom) - 6 (Sab)
+  const startDayOfWeek = firstDay.getDay();
 
   const days = [];
-
-  // Días vacíos previos (padding)
-  for (let i = 0; i < startDayOfWeek; i++) {
-    days.push(null);
-  }
-
-  // Días del mes
+  for (let i = 0; i < startDayOfWeek; i++) days.push(null);
   for (let i = 1; i <= daysInMonth; i++) {
     const d = new Date(year, month, i);
     days.push({
@@ -294,353 +234,213 @@ function getMonthDays(date) {
       isToday: d.toDateString() === new Date().toDateString()
     });
   }
-
   return days;
 }
 
-// Helper para contar días por persona en el mes
-function getMonthlyStats(days) {
-  const stats = {};
-  TEAM.forEach(t => stats[t.id] = 0);
-
-  days.forEach(day => {
-    if (day && day.person && !day.isHoliday && day.date.getDay() !== 0 && day.date.getDay() !== 6) {
-      stats[day.person.id]++;
-    }
-  });
-
-  return TEAM.map(t => ({
-    ...t,
-    count: stats[t.id]
-  })).sort((a, b) => b.count - a.count); // Ordenar por quien tiene más
-}
-
-
-// --- NAVEGACIÓN ---
-
-function prevWeek() {
-  currentViewDate.setDate(currentViewDate.getDate() - 7);
-  render();
-}
-
-function nextWeek() {
-  currentViewDate.setDate(currentViewDate.getDate() + 7);
-  render();
-}
-
-function goToToday() {
-  currentViewDate = new Date();
-  currentMonthViewDate = new Date(); // También resetear mes
-  render();
-}
-
-function prevMonth() {
-  currentMonthViewDate.setMonth(currentMonthViewDate.getMonth() - 1);
-  render();
-}
-
-function nextMonth() {
-  currentMonthViewDate.setMonth(currentMonthViewDate.getMonth() + 1);
-  render();
-}
-
-
-// --- SEGURIDAD (ADMIN MODE SIMPLE) ---
-async function verifyAdmin() {
-  if (isAdmin) return true;
-
-  const intent = confirm("🔒 Esta acción es solo para Aldo.\n\n¿Sos Aldo? (Aceptar para ingresar PIN, Cancelar para volver)");
-
-  if (!intent) {
-    showLocalNotification("⛔ Pide el cambio a Aldo");
-    return false;
-  }
-
-  const pin = prompt("Ingresa el PIN de seguridad:");
-
-  if (pin === '6352') {
-    isAdmin = true;
-    localStorage.setItem('isla_bonita_admin', 'true');
-    showLocalNotification('🔓 Modo Admin Activado (Guardado)');
-    return true;
-  } else {
-    alert("PIN Incorrecto");
-    return false;
-  }
-}
-
-
-function isCurrentWeek(date) {
-  const now = new Date();
-  const startOfNow = new Date(now);
+function getWeekDays(date) {
+  const startOfNow = new Date(date);
   startOfNow.setHours(0, 0, 0, 0);
   const day = startOfNow.getDay();
-  const diff = startOfNow.getDate() - day + (day === 0 ? -6 : 1);
+  const diff = startOfNow.getDate() - day + (day === 0 ? -6 : 1); // Lunes
   startOfNow.setDate(diff);
 
-  const startOfView = new Date(date);
-  startOfView.setHours(0, 0, 0, 0);
-  const dayView = startOfView.getDay();
-  const diffView = startOfView.getDate() - dayView + (dayView === 0 ? -6 : 1);
-  startOfView.setDate(diffView);
-
-  return startOfNow.getTime() === startOfView.getTime();
+  const days = [];
+  for (let i = 0; i < 5; i++) {
+    const d = new Date(startOfNow);
+    d.setDate(startOfNow.getDate() + i);
+    days.push({
+      date: d,
+      dateStr: d.toISOString().split('T')[0],
+      dayNum: d.getDate(),
+      person: getHomeOfficePerson(d),
+      isHoliday: isHoliday(d),
+      birthday: getBirthday(d),
+      isToday: d.toDateString() === new Date().toDateString()
+    });
+  }
+  return days;
 }
 
-// --- RENDERIZADO ---
-
-const app = document.querySelector('#app');
-let selectedDayToSwap = null;
-
-
 function render() {
-  const now = new Date(new Date().setHours(0, 0, 0, 0));
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
 
-  // SEMANA
-  const weekDays = getWeekDays(currentViewDate);
-  const weekMonth = MONTHS_ES[weekDays[0].date.getMonth()];
-  const weekYear = weekDays[0].date.getFullYear();
-
-  // MES
+  // Stats Mensuales
   const monthDays = getMonthDays(currentMonthViewDate);
+  const monthStats = getMonthlyStats(monthDays);
   const monthName = MONTHS_ES[currentMonthViewDate.getMonth()];
   const monthYear = currentMonthViewDate.getFullYear();
 
-  // CARDS
+  // Cards
   const todayPerson = getHomeOfficePerson(now);
-  const tomorrow = new Date(now);
-  do {
-    tomorrow.setDate(tomorrow.getDate() + 1);
-  } while (!isWorkingDay(tomorrow) && tomorrow.getFullYear() === now.getFullYear());
-  const tomorrowPerson = getHomeOfficePerson(tomorrow);
+  let nextDay = new Date(now);
+  do { nextDay.setDate(nextDay.getDate() + 1); }
+  while (!isWorkingDay(nextDay) && nextDay.getFullYear() === now.getFullYear());
+  const nextPerson = getHomeOfficePerson(nextDay);
+
+  // Semana
+  const weekDays = getWeekDays(currentViewDate);
+  const weekMonth = MONTHS_ES[weekDays[0].date.getMonth()];
 
 
+  const app = document.querySelector('#app');
   app.innerHTML = `
     <header>
       <div style="display: flex; align-items: center; gap: 15px;">
-        <div class="logo-container">
-          <img src="logo.svg" alt="Isla Bonita">
-        </div>
+        <div class="logo-container"><img src="logo.svg" alt="Isla Bonita"></div>
         <div>
           <h1>Isla Bonita</h1>
           <p style="font-size: 0.7rem; opacity: 0.6; margin-top: -2px;">Seguimiento de Home Office</p>
         </div>
       </div>
-      
-      <button class="theme-toggle" onclick="toggleDarkMode()">
-        ${darkMode ? '☀️' : '🌙'}
-      </button>
+      <button class="theme-toggle" onclick="toggleDarkMode()">${darkMode ? '☀️' : '🌙'}</button>
     </header>
 
     <main>
-      <!-- VISTA SEMANAL -->
+      <!-- WEEKLY -->
       <div class="calendar-card">
         <div class="calendar-header">
           <button class="nav-btn" onclick="prevWeek()">❮</button>
           <div style="text-align: center;">
-            <span class="calendar-title">${weekMonth} ${weekYear}</span>
-            <div style="font-size: 0.7rem; opacity: 0.6;">Semana del ${weekDays[0].dayNum} al ${weekDays[4].dayNum}</div>
+            <span class="calendar-title">${weekMonth} ${weekDays[0].date.getFullYear()}</span>
+            <div style="font-size: 0.7rem; opacity: 0.6;">Semana ${weekDays[0].dayNum} - ${weekDays[4].dayNum}</div>
           </div>
           <button class="nav-btn" onclick="nextWeek()">❯</button>
         </div>
         
         <div class="week-grid">
-          ${weekDays.map(day => `
+           ${weekDays.map(day => `
             <div class="day-cell ${day.isToday ? 'active' : ''} ${day.isHoliday ? 'holiday' : ''}" 
                  onclick="${!day.isHoliday ? `openSwapDialog('${day.dateStr}')` : ''}"
-                 style="${!day.isHoliday && day.person ? `border-bottom: 3px solid ${day.person.color}` : ''}">
-              
-              <div style="font-size: 0.7rem; font-weight: 700; margin-bottom: 4px; opacity: 0.7;">
-                ${DAYS_ES[day.date.getDay()].substring(0, 3)} ${day.dayNum}
-              </div>
-              
-              ${day.isHoliday
-      ? '<div style="font-size: 1.5rem;">🇦🇷</div>'
-      : day.birthday
-        ? `<div class="user-avatar" style="background: #FFF0F5; color: #D81B60; border: 1px solid #FF69B4; font-size: 1.2rem;">🎂</div>`
-        : `<div style="font-weight: 800; font-size: 0.9rem; color: ${day.person?.color || 'inherit'}; text-align: center; line-height: 1.1;">
-                      ${day.person?.name || '?'}
-                     </div>`
+                 style="${day.person && !day.isHoliday ? `border-bottom: 3px solid ${day.person.color}` : ''}">
+              <div style="font-size: 0.7rem; opacity: 0.7; font-weight:700;">${DAYS_ES[day.date.getDay()].substring(0, 3)} ${day.dayNum}</div>
+               ${day.isHoliday ? '<div style="font-size:1.5rem">🇦🇷</div>' :
+      day.birthday ? '<div class="user-avatar" style="background:#FFF0F5;color:#D81B60;border:1px solid #FF69B4;">🎂</div>' :
+        `<div style="font-weight:800;font-size:0.9rem;color:${day.person?.color || 'inherit'}">${day.person?.name || '?'}</div>`
     }
-              
-              ${day.birthday ? `<div style="font-size: 0.5rem; color: #D81B60; font-weight: 700; margin-top: 2px;">Cumple</div>` : ''}
-              ${overrides[day.dateStr] ? '<div style="font-size: 0.5rem; margin-top: 1px;">✏️</div>' : ''}
+               ${overrides[day.dateStr] ? '<div style="font-size:0.5rem">✏️</div>' : ''}
             </div>
-          `).join('')}
+           `).join('')}
         </div>
-        <button class="btn-today" onclick="goToToday()" style="${isCurrentWeek(currentViewDate) ? 'display:none' : ''}">Volver a Hoy</button>
+        <button class="btn-today" onclick="goToToday()">Volver a Hoy</button>
       </div>
 
-      <!-- CARDS INFO -->
+      <!-- CARDS -->
       <div class="info-section">
         <div class="card big-card">
           <div class="icon-box bg-palm">🏠</div>
           <div class="card-content">
-            <h3 class="label-small">Hoy le toca:</h3>
-            <p class="name-big">${todayPerson ? todayPerson.name : 'Nadie (Feriado/Finde)'}</p>
+            <h3 class="label-small">Hoy:</h3>
+            <p class="name-big">${todayPerson ? todayPerson.name : 'Nadie'}</p>
           </div>
         </div>
-
         <div class="card big-card">
           <div class="icon-box bg-sea">🌅</div>
           <div class="card-content">
-            <h3 class="label-small">Mañana le toca:</h3>
-            <p class="name-big">${tomorrowPerson ? tomorrowPerson.name : 'Nadie'}</p>
+            <h3 class="label-small">Siguiente:</h3>
+            <p class="name-big">${nextPerson ? nextPerson.name : 'Nadie'}</p>
           </div>
         </div>
       </div>
 
-      <!-- VISTA MENSUAL -->
+      <!-- MONTHLY -->
       <div class="mcal-card">
         <div class="mcal-header">
-          <button class="nav-btn" onclick="prevMonth()">❮</button>
-          <span class="mcal-title">${monthName} ${monthYear}</span>
-          <button class="nav-btn" onclick="nextMonth()">❯</button>
+           <button class="nav-btn" onclick="prevMonth()">❮</button>
+           <span class="mcal-title">${monthName} ${monthYear}</span>
+           <button class="nav-btn" onclick="nextMonth()">❯</button>
         </div>
-        
         <div class="mcal-grid">
-          <div class="mcal-head">D</div>
-          <div class="mcal-head">L</div>
-          <div class="mcal-head">M</div>
-          <div class="mcal-head">X</div>
-          <div class="mcal-head">J</div>
-          <div class="mcal-head">V</div>
-          <div class="mcal-head">S</div>
-
-          ${monthDays.map(day => {
+           <div class="mcal-head">D</div><div class="mcal-head">L</div><div class="mcal-head">M</div><div class="mcal-head">X</div><div class="mcal-head">J</div><div class="mcal-head">V</div><div class="mcal-head">S</div>
+           ${monthDays.map(day => {
       if (!day) return '<div class="mcal-cell empty"></div>';
-
-      const isWeekend = day.date.getDay() === 0 || day.date.getDay() === 6;
-      let content = '';
-
-      if (day.isHoliday) {
-        content = '<span style="font-size: 0.8rem;">🇦🇷</span>';
-      } else if (day.person && !isWeekend) {
-        content = `<div class="mcal-initial" style="background-color: ${day.person.color}">${day.person.initial}</div>`;
-      }
-
+      const isWk = day.date.getDay() === 0 || day.date.getDay() === 6;
       return `
-              <div class="mcal-cell ${day.isToday ? 'mcal-today' : ''} ${isWeekend ? 'mcal-off' : ''}"
-                   onclick="${(!isWeekend && !day.isHoliday && day.person) ? `openSwapDialog('${day.dateStr}')` : ''}">
-                <span class="mcal-num">${day.dayNum}</span>
-                ${content}
-              </div>
-            `;
+               <div class="mcal-cell ${day.isToday ? 'mcal-today' : ''} ${isWk ? 'mcal-off' : ''}"
+                    onclick="${(!isWk && !day.isHoliday && day.person) ? `openSwapDialog('${day.dateStr}')` : ''}">
+                 <span class="mcal-num">${day.dayNum}</span>
+                 ${day.isHoliday ? '<span>🇦🇷</span>' : (day.person && !isWk ? `<div class="mcal-initial" style="background:${day.person.color}">${day.person.initial}</div>` : '')}
+               </div>
+             `;
     }).join('')}
         </div>
-
-        <!-- RESUMEN MENSUAL -->
+        
         <div class="mcal-summary">
-          <div class="mcal-summary-title">Días Home Office (Estimado)</div>
-          ${(() => {
-      const stats = getMonthlyStats(monthDays); // Calcular stats
-      return stats.map(st => `
-              <div class="mcal-summary-item">
-                <div class="mcal-summary-dot" style="background-color: ${st.color}"></div>
-                <div class="mcal-summary-name">${st.name}</div>
-                <div class="mcal-summary-count" style="color: ${st.color}; background: ${st.color}20">${st.count}</div>
-              </div>
-            `).join('');
-    })()}
+           <div class="mcal-summary-title">Días Home Office (Estimado)</div>
+           ${monthStats.map(s => `
+             <div class="mcal-summary-item">
+               <div class="mcal-summary-dot" style="background:${s.color}"></div>
+               <div class="mcal-summary-name">${s.name}</div>
+               <div class="mcal-summary-count" style="color:${s.color};background:${s.color}20">${s.count}</div>
+             </div>
+           `).join('')}
         </div>
-      </div>
-
-      <div id="install-banner" class="install-banner">
-        <p>¿Instalar Isla Bonita?</p>
-        <button id="btn-install" class="btn-install">Instalar</button>
       </div>
     </main>
 
     <div id="swap-modal" class="swap-modal">
       <div class="modal-content">
-        <h2 class="modal-title">Asignar día a:</h2>
+        <h2>Asignar a:</h2>
         <div class="team-list">
-          ${TEAM.map(member => `
-            <div class="team-item" onclick="confirmSwap(${member.id})">
-              <div class="user-avatar" style="color: ${member.color}">${member.initial}</div>
-              <span>${member.name}</span>
+          ${TEAM.map(m => `
+            <div class="team-item" onclick="confirmSwap(${m.id})">
+              <div class="user-avatar" style="color:${m.color}">${m.initial}</div>
+              <span>${m.name}</span>
             </div>
           `).join('')}
         </div>
-        <button id="close-modal" style="margin-top: 20px; width: 100%; padding: 10px; border: none; background: #eee; border-radius: 12px; font-weight: 600;">Cancelar</button>
+        <button id="close-modal" style="margin-top:20px;width:100%;padding:10px;">Cancelar</button>
       </div>
     </div>
   `;
-
-  setupEventListeners();
+  setupEvents();
 }
 
-// Re-declarar funciones globales para window
-window.openSwapDialog = async (dateStr) => {
-  const isAuthorized = await verifyAdmin();
-  if (isAuthorized) {
-    selectedDayToSwap = dateStr;
-    document.querySelector('#swap-modal').style.display = 'flex';
-  }
-};
-
-window.confirmSwap = (personId) => {
-  if (selectedDayToSwap) {
-    saveOverride(selectedDayToSwap, personId);
-    selectedDayToSwap = null;
-    document.querySelector('#swap-modal').style.display = 'none';
-  }
-};
-
-window.toggleDarkMode = toggleDarkMode;
-window.prevWeek = prevWeek;
-window.nextWeek = nextWeek;
-window.goToToday = goToToday;
-window.prevMonth = prevMonth;
-window.nextMonth = nextMonth;
-
-function setupEventListeners() {
-  const btnInstall = document.querySelector('#btn-install');
-  if (btnInstall) {
-    btnInstall.addEventListener('click', () => {
-      // Logic for install placeholder
-      if (window.deferredPrompt) {
-        window.deferredPrompt.prompt();
-        window.deferredPrompt.userChoice.then((choiceResult) => {
-          if (choiceResult.outcome === 'accepted') {
-            console.log('User accepted the install prompt');
-          } else {
-            console.log('User dismissed the install prompt');
-          }
-          window.deferredPrompt = null;
-          document.querySelector('#install-banner').style.display = 'none';
-        });
+function verifyAdmin() {
+  if (isAdmin) return Promise.resolve(true);
+  return new Promise(resolve => {
+    if (confirm("🔒 ¿Sos Aldo?")) {
+      const pin = prompt("PIN:");
+      if (pin === '6352') {
+        isAdmin = true;
+        localStorage.setItem('isla_bonita_admin', 'true');
+        showLocalNotification('Admin Activado');
+        resolve(true);
+      } else {
+        alert("PIN Incorrecto");
+        resolve(false);
       }
-    });
-  }
-
-  // Capture install prompt
-  window.addEventListener('beforeinstallprompt', (e) => {
-    e.preventDefault();
-    window.deferredPrompt = e;
-    const banner = document.querySelector('#install-banner');
-    if (banner) banner.style.display = 'flex';
-  });
-
-  const modal = document.querySelector('#swap-modal');
-  const closeModal = document.querySelector('#close-modal');
-  if (closeModal) {
-    closeModal.addEventListener('click', () => {
-      modal.style.display = 'none';
-    });
-  }
-}
-
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js')
-      .then(reg => console.log('SW registrado', reg))
-      .catch(err => console.log('SW error', err));
+    } else {
+      showLocalNotification("Solo Aldo puede editar");
+      resolve(false);
+    }
   });
 }
 
-if ('Notification' in window && Notification.permission !== 'granted' && Notification.permission !== 'denied') {
-  Notification.requestPermission();
+function setupEvents() {
+  window.toggleDarkMode = toggleDarkMode;
+  window.prevWeek = () => { currentViewDate.setDate(currentViewDate.getDate() - 7); render(); };
+  window.nextWeek = () => { currentViewDate.setDate(currentViewDate.getDate() + 7); render(); };
+  window.prevMonth = () => { currentMonthViewDate.setMonth(currentMonthViewDate.getMonth() - 1); render(); };
+  window.nextMonth = () => { currentMonthViewDate.setMonth(currentMonthViewDate.getMonth() + 1); render(); };
+  window.goToToday = () => { currentViewDate = new Date(); currentMonthViewDate = new Date(); render(); };
+
+  window.openSwapDialog = async (ds) => {
+    if (await verifyAdmin()) {
+      window.selectedDay = ds;
+      document.getElementById('swap-modal').style.display = 'flex';
+    }
+  };
+  window.confirmSwap = (pid) => {
+    if (window.selectedDay) {
+      saveOverride(window.selectedDay, pid);
+      document.getElementById('swap-modal').style.display = 'none';
+    }
+  };
+
+  const close = document.getElementById('close-modal');
+  if (close) close.onclick = () => document.getElementById('swap-modal').style.display = 'none';
 }
 
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 render();
