@@ -314,18 +314,20 @@ function render() {
 
 
   app.innerHTML = `
-    <button class="theme-toggle" onclick="toggleDarkMode()">
-      ${darkMode ? '☀️' : '🌙'}
-    </button>
-
     <header>
-      <div class="logo-container">
-        <img src="logo.svg" alt="Isla Bonita">
+      <div style="display: flex; align-items: center; gap: 15px;">
+        <div class="logo-container">
+          <img src="logo.svg" alt="Isla Bonita">
+        </div>
+        <div>
+          <h1>Isla Bonita</h1>
+          <p style="font-size: 0.7rem; opacity: 0.6; margin-top: -2px;">Seguimiento de Home Office</p>
+        </div>
       </div>
-      <div>
-        <h1>Isla Bonita</h1>
-        <p style="font-size: 0.7rem; opacity: 0.6; margin-top: -2px;">Home Office Tracker</p>
-      </div>
+      
+      <button class="theme-toggle" onclick="toggleDarkMode()">
+        ${darkMode ? '☀️' : '🌙'}
+      </button>
     </header>
 
     <main>

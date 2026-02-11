@@ -61,9 +61,26 @@ body {
 header {
   display: flex;
   align-items: center;
-  gap: 15px;
+  justify-content: space-between;
   margin-bottom: 30px;
   padding: 10px 0;
+}
+
+.theme-toggle {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 50%;
+  transition: background 0.3s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.theme-toggle:hover {
+  background: rgba(0, 0, 0, 0.05);
 }
 
 .logo-container {
