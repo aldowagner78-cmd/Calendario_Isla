@@ -311,10 +311,19 @@ function setupEventListeners() {
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js')
-      .then(reg => console.log('SW registrado', reg))
+      .then(reg => {
+        console.log('SW registrado', reg);
+        // Forzar actualización del SW si hay una nueva versión
+        reg.update();
+      })
       .catch(err => console.log('SW error', err));
   });
 }
 
-render();
+try {
+  render();
+} catch (e) {
+  console.error('Error al renderizar:', e);
+  document.querySelector('#app').innerHTML = '<p style="padding:20px;text-align:center;">Error al cargar. Recargá la página.</p>';
+}
 // setInterval(render, 1000 * 60 * 60);
