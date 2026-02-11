@@ -27,6 +27,7 @@ let overrides = JSON.parse(localStorage.getItem('isla_bonita_overrides')) || {};
 function saveOverride(dateString, personId) {
   overrides[dateString] = personId;
   localStorage.setItem('isla_bonita_overrides', JSON.stringify(overrides));
+  scheduleCache = null; // Invalidar cache al cambiar override
   render();
 }
 
@@ -37,21 +38,97 @@ function isWorkingDay(date) {
   return !isHoliday(date);
 }
 
-// Calcula el número de semana calendario desde START_DATE (que es un Lunes)
-function getWeekNumber(date) {
-  const start = new Date(START_DATE);
-  start.setHours(0, 0, 0, 0);
+// Obtener el Lunes de la semana de una fecha
+function getMondayOfWeek(date) {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  const dow = d.getDay();
+  d.setDate(d.getDate() - (dow === 0 ? 6 : dow - 1));
+  return d;
+}
 
-  const target = new Date(date);
-  target.setHours(0, 0, 0, 0);
+// --- SISTEMA DE ROTACIÓN EQUITATIVA ---
+// Computa el calendario completo semana por semana.
+// En cada semana:
+//   1) Se calcula el orden de rotación (el de Vie pasa a Lun la semana sig.)
+//   2) Si hay menos días hábiles que personas (por feriados),
+//      se priorizan quienes tienen MENOS días de HO acumulados.
+//   3) Los seleccionados se asignan a los días en su orden de rotación.
 
-  // Obtener el Lunes de la semana del target
-  const dow = target.getDay();
-  const mondayOfTarget = new Date(target);
-  mondayOfTarget.setDate(target.getDate() - (dow === 0 ? 6 : dow - 1));
+let scheduleCache = null;
 
-  const diffMs = mondayOfTarget.getTime() - start.getTime();
-  return Math.round(diffMs / (7 * 24 * 60 * 60 * 1000));
+function computeFullSchedule() {
+  const schedule = {};
+  const hoCount = {};
+  TEAM.forEach(p => hoCount[p.id] = 0);
+
+  const startDate = new Date(START_DATE);
+  startDate.setHours(0, 0, 0, 0);
+
+  // Computar 2 años hacia adelante
+  const endDate = new Date();
+  endDate.setFullYear(endDate.getFullYear() + 2);
+
+  let monday = getMondayOfWeek(startDate);
+
+  while (monday <= endDate) {
+    // Días hábiles de esta semana
+    const workDays = [];
+    for (let i = 0; i < 5; i++) {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      d.setHours(0, 0, 0, 0);
+      if (d >= startDate && isWorkingDay(d)) {
+        workDays.push(d);
+      }
+    }
+
+    if (workDays.length > 0) {
+      const weekNum = Math.round(
+        (monday.getTime() - startDate.getTime()) / (7 * 24 * 60 * 60 * 1000)
+      );
+
+      // Paso 1: ¿QUIÉN tiene HO esta semana?
+      // Priorizar a los que tienen menos días acumulados.
+      // Desempate por orden de rotación de la semana.
+      const candidates = [...TEAM].sort((a, b) => {
+        const diff = hoCount[a.id] - hoCount[b.id];
+        if (diff !== 0) return diff;
+        const rotA = (TEAM.indexOf(a) + weekNum) % 5;
+        const rotB = (TEAM.indexOf(b) + weekNum) % 5;
+        return rotA - rotB;
+      });
+
+      const selectedIds = new Set(
+        candidates.slice(0, workDays.length).map(p => p.id)
+      );
+
+      // Paso 2: ¿QUÉ DÍA le toca a cada uno? → en orden de rotación
+      const selectedInRotOrder = TEAM
+        .map(p => ({ person: p, rot: (TEAM.indexOf(p) + weekNum) % 5 }))
+        .filter(x => selectedIds.has(x.person.id))
+        .sort((a, b) => a.rot - b.rot)
+        .map(x => x.person);
+
+      for (let i = 0; i < workDays.length; i++) {
+        const ds = workDays[i].toISOString().split('T')[0];
+        schedule[ds] = selectedInRotOrder[i];
+        hoCount[selectedInRotOrder[i].id]++;
+      }
+    }
+
+    monday = new Date(monday);
+    monday.setDate(monday.getDate() + 7);
+  }
+
+  return schedule;
+}
+
+function getSchedule() {
+  if (!scheduleCache) {
+    scheduleCache = computeFullSchedule();
+  }
+  return scheduleCache;
 }
 
 function getHomeOfficePerson(date) {
@@ -62,17 +139,12 @@ function getHomeOfficePerson(date) {
     return TEAM.find(p => p.id === overrides[dateStr]);
   }
 
-  // 2. Revisar si es fin de semana o feriado
+  // 2. Fin de semana o feriado
   if (!isWorkingDay(date)) return null;
 
-  // 3. Rotación basada en SEMANA CALENDARIO (no en conteo de días hábiles)
-  // Cada semana el patrón se desplaza 1 posición: el de Viernes pasa a Lunes
-  // Esto GARANTIZA que nadie se repite dentro de la misma semana
-  const weekNum = getWeekNumber(date);
-  const dayIndex = date.getDay() - 1; // Lun=0, Mar=1, Mie=2, Jue=3, Vie=4
-  const personIndex = ((dayIndex - weekNum) % 5 + 5) % 5;
-
-  return TEAM[personIndex];
+  // 3. Buscar en el calendario computado
+  const schedule = getSchedule();
+  return schedule[dateStr] || null;
 }
 
 function getWeekDays(date) {
