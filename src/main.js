@@ -26,16 +26,13 @@ if (darkMode) document.body.classList.add('dark-mode');
 
 // --- OVERRIDES ---
 let overrides = {};
-let simulationCache = {};
 
 (async () => {
   try {
     overrides = await getOverridesRemote();
-    runSimulation(); // Recalcular
     render();
   } catch (e) {
     overrides = JSON.parse(localStorage.getItem('isla_bonita_overrides')) || {};
-    runSimulation();
     render();
   }
 })();
@@ -45,7 +42,6 @@ subscribeOverrides(async () => {
     const newOverrides = await getOverridesRemote();
     if (JSON.stringify(newOverrides) !== JSON.stringify(overrides)) {
       overrides = newOverrides;
-      runSimulation();
       showLocalNotification('🔄 Calendario actualizado remotamente');
       render();
     }
@@ -54,23 +50,41 @@ subscribeOverrides(async () => {
 
 async function saveOverride(dateString, personId) {
   try {
+    // 1. Obtener quién estaba antes para la notificación
+    // Para simplificar, calculamos quién estaba asignado originalmente en esa fecha
+    const dateObj = new Date(dateString + 'T00:00:00');
+    // Usamos la lógica base para saber quién "debería" estar
+    // Ojo: si ya había un override, override[dateString] nos dice quién estaba.
+    // Pero getHomeOfficePerson ya usa overrides.
+    // Vamos a calcular el "original" ignorando overrides un segundo
+    const originalPerson = getHomeOfficePersonBase(dateObj); // Lógica pura
+    const previousOverrideId = overrides[dateString];
+
+    let previousName = originalPerson ? originalPerson.name : 'Nadie';
+    if (previousOverrideId) {
+      const prevObj = TEAM.find(p => p.id === previousOverrideId);
+      if (prevObj) previousName = prevObj.name;
+    }
+
+    const newPerson = TEAM.find(p => p.id === personId);
+
+    // 2. Guardar
     await saveOverrideRemote(dateString, personId);
     overrides[dateString] = personId;
-    runSimulation();
     render();
-    showLocalNotification('Cambio guardado');
+
+    // 3. Notificación Mejorada
+    if (newPerson) {
+      showLocalNotification(`Cambio: ${newPerson.name} reemplaza a ${previousName}`);
+    }
+
   } catch (e) {
     showLocalNotification('❌ Error al guardar');
+    console.error(e);
   }
 }
 
 // --- UTILIDADES ---
-function isWorkingDay(date) {
-  const day = date.getDay();
-  if (day === 0 || day === 6) return false;
-  return !isHoliday(date);
-}
-
 function showLocalNotification(msg) {
   const toast = document.createElement('div');
   toast.innerText = msg;
@@ -78,7 +92,7 @@ function showLocalNotification(msg) {
     position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)',
     background: 'var(--palm)', color: 'var(--sand)', padding: '12px 24px',
     borderRadius: '50px', boxShadow: '0 4px 12px var(--shadow)', zIndex: '10000',
-    fontSize: '0.9rem', fontWeight: '600'
+    fontSize: '0.9rem', fontWeight: '600', textAlign: 'center', minWidth: '300px'
   });
   document.body.appendChild(toast);
   setTimeout(() => toast.remove(), 4000);
@@ -92,120 +106,66 @@ function toggleDarkMode() {
 }
 
 // ==========================================
-// === ALGORITMO DE SIMULACIÓN (V13 FIX) ===
+// === LÓGICA DE NEGOCIO SIMPLE (REVERT) ===
 // ==========================================
 
-function runSimulation() {
-  simulationCache = {};
-
-  let state = {
-    lastAssignedIndex: TEAM.length - 1,   // Último asignado (para rotación simple)
-    pendingFridayUserIndex: -1,           // Quién tuvo el último viernes (para continuidad)
-    monthlyCounts: {},
-    currentMonth: -1
-  };
-
-  // Inicializar contadores
-  TEAM.forEach(p => state.monthlyCounts[p.id] = 0);
-
-  // Simulamos hasta 2 años
-  const endDate = new Date(START_DATE);
-  endDate.setFullYear(endDate.getFullYear() + 2);
-
-  let currentDate = new Date(START_DATE);
-  currentDate.setHours(0, 0, 0, 0);
-
-  while (currentDate <= endDate) {
-    const dateStr = currentDate.toISOString().split('T')[0];
-    const month = currentDate.getMonth();
-
-    // 1. Cambio de mes: Reiniciar contadores
-    if (month !== state.currentMonth) {
-      TEAM.forEach(p => state.monthlyCounts[p.id] = 0);
-      state.currentMonth = month;
-    }
-
-    // 2. Si es día laboral
-    if (isWorkingDay(currentDate)) {
-      let assignedPersonIndex = -1;
-
-      // A. Override (Fuerza Mayor)
-      if (overrides[dateStr]) {
-        assignedPersonIndex = TEAM.findIndex(p => p.id === overrides[dateStr]);
-      } else {
-        // B. Selección de Candidato
-
-        // Regla 2: Continuidad (Con corrección de feriados: usamos pendingFridayUserIndex)
-        if (state.pendingFridayUserIndex !== -1) {
-          assignedPersonIndex = state.pendingFridayUserIndex;
-        } else {
-          // Regla 3: Rotación Simple
-          assignedPersonIndex = (state.lastAssignedIndex + 1) % TEAM.length;
-        }
-
-        // Regla 1: EQUIDAD MENSUAL (GOLDEN RULE)
-        // Verificamos si asignar al candidato rompe la equidad (Max - Min > 1)
-        assignedPersonIndex = applyEquityRule(assignedPersonIndex, state.monthlyCounts);
-      }
-
-      // C. Confirmar Asignación
-      if (assignedPersonIndex !== -1) {
-        const person = TEAM[assignedPersonIndex];
-
-        // Guardar
-        simulationCache[dateStr] = person.id;
-        state.monthlyCounts[person.id]++;
-        state.lastAssignedIndex = assignedPersonIndex;
-
-        // Gestión del Viernes
-        if (currentDate.getDay() === 5) { // Viernes
-          state.pendingFridayUserIndex = assignedPersonIndex;
-        } else {
-          // Si asignamos un Lunes (o Martes post-feriado), consumimos el pendiente
-          state.pendingFridayUserIndex = -1;
-        }
-      }
-    }
-
-    // Avanzar
-    currentDate.setDate(currentDate.getDate() + 1);
-  }
+function isWorkingDay(date) {
+  const day = date.getDay();
+  if (day === 0 || day === 6) return false;
+  return !isHoliday(date);
 }
 
+// Cálculo de días hábiles desde START_DATE
+function getWorkingDayIndex(date) {
+  let count = 0;
+  let d = new Date(START_DATE);
+  d.setHours(0, 0, 0, 0);
 
-function applyEquityRule(candidateIndex, counts) {
-  const candidateId = TEAM[candidateIndex].id;
+  const target = new Date(date);
+  target.setHours(0, 0, 0, 0);
 
-  // Proyección
-  const projectedCounts = { ...counts };
-  projectedCounts[candidateId]++;
+  if (target < d) return -1; // Antes del inicio
 
-  const values = Object.values(projectedCounts);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-
-  // SI SE ROMPE LA EQUIDAD
-  if ((max - min) > 1) {
-    // Buscar reemplazo: Alguien que tenga el mínimo actual
-    // Priorizamos el primero en la lista (según lógica simple)
-    const currentMin = Math.min(...Object.values(counts));
-    const replacementIndex = TEAM.findIndex(p => counts[p.id] === currentMin);
-    return replacementIndex;
+  while (d < target) {
+    if (isWorkingDay(d)) {
+      count++;
+    }
+    d.setDate(d.getDate() + 1);
   }
 
-  return candidateIndex;
+  // Si el día objetivo NO es laborable, retornamos -1 (no tiene índice de rotación)
+  // Pero si el loop termina en target, hemos contado los días ANTERIORES.
+  // El índice para "target" es "count" (0-based) si target es working day.
+
+  return count;
 }
 
-function getHomeOfficePerson(date) {
-  const dateStr = date.toISOString().split('T')[0];
-  if (date < START_DATE) return null; // Pasado vacío
+// Función base sin overrides (para notificaciones)
+function getHomeOfficePersonBase(date) {
+  if (date < START_DATE) return null;
   if (!isWorkingDay(date)) return null;
 
-  if (Object.keys(simulationCache).length === 0) runSimulation();
+  const idx = getWorkingDayIndex(date);
+  if (idx === -1) return null;
 
-  const personId = simulationCache[dateStr];
-  return personId ? TEAM.find(p => p.id === personId) : null;
+  // ROTACIÓN SIMPLE: (Index) % 5
+  // Orden: Machi(0), Fabi(1), Gaston(2), Romi(3), Aldo(4)
+  return TEAM[idx % TEAM.length];
 }
+
+// Función principal con overrides
+function getHomeOfficePerson(date) {
+  const dateStr = date.toISOString().split('T')[0];
+
+  // 1. Override
+  if (overrides && overrides[dateStr]) {
+    return TEAM.find(p => p.id === overrides[dateStr]);
+  }
+
+  // 2. Lógica Base
+  return getHomeOfficePersonBase(date);
+}
+
 
 // --- RENDER ---
 function getMonthlyStats(days) {
@@ -453,16 +413,13 @@ window.confirmSwap = (pid) => {
 
 window.onload = () => {
   const close = document.getElementById('close-modal');
-  // Esto podría fallar si swap modal no está renderizado al cargar
-  // Mejor hacerlo delegando o en render?
-  // En mi estructura actual, render se llama al final.
-  // Pero el click en close-modal requiere que el elemento exista.
-  // Agregar event listener al contenedor global es más seguro.
-  document.addEventListener('click', (e) => {
-    if (e.target && e.target.id == 'close-modal') {
-      document.getElementById('swap-modal').style.display = 'none';
-    }
-  });
+  if (close) {
+    document.addEventListener('click', (e) => {
+      if (e.target && e.target.id == 'close-modal') {
+        document.getElementById('swap-modal').style.display = 'none';
+      }
+    });
+  }
 
   // Installer
   window.addEventListener('beforeinstallprompt', (e) => {
