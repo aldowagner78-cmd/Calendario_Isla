@@ -164,6 +164,34 @@ h1 {
   color: white;
 }
 
+/* Navigation */
+.nav-btn {
+  background: none;
+  border: none;
+  font-size: 1.5rem;
+  color: var(--palm);
+  cursor: pointer;
+  padding: 5px 10px;
+  border-radius: 8px;
+  transition: background 0.2s;
+}
+
+.nav-btn:hover {
+  background: rgba(45, 90, 39, 0.1);
+}
+
+.btn-today {
+  display: block;
+  margin: 10px auto 0;
+  padding: 5px 15px;
+  background: var(--sand);
+  border: 1px solid var(--palm);
+  color: var(--palm);
+  border-radius: 20px;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
 /* Next Up Section */
 .info-section {
   margin-top: 10px;
@@ -221,19 +249,28 @@ h1 {
 }
 
 .label-small {
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   text-transform: uppercase;
-  color: #888;
+  color: #999;
   font-weight: 600;
-  letter-spacing: 0.5px;
-  margin-bottom: 4px;
+  letter-spacing: 1px;
+  margin-bottom: 0px;
 }
 
 .name-big {
-  font-size: 1.8rem;
-  font-weight: 700;
+  font-size: 3.5rem;
+  font-weight: 800;
   color: var(--palm);
-  line-height: 1.1;
+  line-height: 1;
+  letter-spacing: -1px;
+  margin-top: 5px;
+}
+
+/* Holiday Style */
+.holiday {
+  background-color: #fdfcf0;
+  border: 2px dashed #e0e0e0;
+  opacity: 0.8;
 }
 
 .card-content h3 {
