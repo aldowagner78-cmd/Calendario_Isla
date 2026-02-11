@@ -55,8 +55,6 @@ subscribeOverrides(async () => {
 async function saveOverride(dateString, personId) {
   try {
     // En este algoritmo definitivo, el override es SAGRADO (Regla 6).
-    // No hacemos swap automático, simplemente respetamos la voluntad del usuario.
-    // El sistema se re-simulará alrededor de este cambio.
     const newPerson = TEAM.find(p => p.id === personId);
 
     await saveOverrideRemote(dateString, personId);
@@ -102,7 +100,7 @@ function isWorkingDay(date) {
 }
 
 // ==========================================
-// === ALGORITMO DEFINITIVO (6 REGLAS) ===
+// === ALGORITMO DEFINITIVO (6 REGLAS - v18) ===
 // ==========================================
 
 function runSimulation() {
@@ -162,57 +160,59 @@ function runSimulation() {
       // REGLA 6: OVERRIDES SON SAGRADOS
       if (overrides[dateStr]) {
         assignedPerson = TEAM.find(p => p.id === overrides[dateStr]);
-
-        // Efectos colaterales del override:
-        // Si alguien tomó este día a la fuerza, hay que actualizar el estado
-        // para que el sistema "sepa" que ya gastó su cartucho semanal/mensual.
       } else {
         // --- SELECCIÓN AUTOMÁTICA ---
 
-        // Candidatos
         let candidates = [];
+        let specificContinuityCandidate = null;
 
-        // A. Prioridad: Continuidad (Regla 3)
+        // A. Prioridad ABSOLUTA: Continuidad (Regla 3)
+        // El usuario del viernes anterior TIENE DERECHO PREFERENTE
         if (state.pendingFridayUser) {
+          specificContinuityCandidate = state.pendingFridayUser;
           candidates.push(state.pendingFridayUser);
         }
 
-        // B. Rotación Natural (Fallback)
-        // Buscamos el siguiente en la lista que NO sea el pending (para no duplicar)
-        // O simplemente el siguiente lógico
-        let nextIndex = (state.lastAssignedIndex + 1) % TEAM.length;
-        candidates.push(TEAM[nextIndex]);
-
-        // C. Equidad Forzada (Regla 5 - Adaptación)
-        // Si estamos a fin de mes (día > 21), añadimos a los más necesitados
+        // B. Prioridad EQUIDAD (Regla 5 - Adaptación Fin de Mes)
+        // Solo si NO es un día de continuidad (o si el de continuidad falla)
         if (d.getDate() > 21) {
           const minCount = Math.min(...Object.values(state.monthlyCounts));
           const needy = TEAM.filter(t => state.monthlyCounts[t.id] === minCount);
-          // Los ponemos AL PRINCIPIO de la lista de candidatos
-          candidates = [...needy, ...candidates];
+          candidates = [...candidates, ...needy];
         }
+
+        // C. Rotación Natural (Fallback)
+        let nextIndex = (state.lastAssignedIndex + 1) % TEAM.length;
+        candidates.push(TEAM[nextIndex]);
+
+        // D. Fallback Final: Todos (ordenados por quién tiene menos días)
+        const allSorted = [...TEAM].sort((a, b) => state.monthlyCounts[a.id] - state.monthlyCounts[b.id]);
+        candidates = [...candidates, ...allSorted];
+
+        // Eliminamos duplicados
+        candidates = [...new Set(candidates)];
 
         // --- FILTRADO DE CANDIDATOS (REGLAS RESTRICTIVAS) ---
 
         for (const candidate of candidates) {
           if (!candidate) continue;
 
-          // REGLA 2: Límite Semanal (Estricta)
-          // Si ya tiene 1 día esta semana, DESCARTADO.
+          // REGLA 2: Límite Semanal (Estricta - HARD)
           if (state.weeklyCounts[candidate.id] >= 1) continue;
 
-          // REGLA 1: Equidad (Suave) - Evitar disparar la diferencia > 1
-          // Calculamos cómo quedaría
-          const currentMin = Math.min(...Object.values(state.monthlyCounts));
-          const currentMax = Math.max(...Object.values(state.monthlyCounts));
+          // REGLA 1: Equidad (Suave - SOFT)
+          // EXCEPCIÓN CLAVE: Si es el candidato de CONTINUIDAD,
+          // ignoramos esta regla. La continuidad mata equidad suave.
+          const isContinuity = specificContinuityCandidate && (candidate.id === specificContinuityCandidate.id);
 
-          // Si asignarle a este hace que (SuCount + 1) - Min > 1, intentamos evitarlo
-          // Salvo que sea fin de mes y sea mandatario llenar huecos
-          // O salvo que sea el único candidato disponible
-          const projectedCount = state.monthlyCounts[candidate.id] + 1;
-          if ((projectedCount - currentMin) > 1 && d.getDate() <= 21) {
-            // Intentamos saltarlo si hay otro candidato
-            continue;
+          if (!isContinuity) {
+            const currentMin = Math.min(...Object.values(state.monthlyCounts));
+            const projectedCount = state.monthlyCounts[candidate.id] + 1;
+
+            // Si disparar la diferencia > 1, intentamos saltarlo
+            if ((projectedCount - currentMin) > 1) {
+              continue;
+            }
           }
 
           // Si pasa los filtros, es EL ELEGIDO
@@ -221,21 +221,14 @@ function runSimulation() {
         }
 
         // --- FALLBACK DE EMERGENCIA ---
-        // Si todos los candidatos fueron filtrados (ej: todos tienen 1 día esta semana)
-        // Debemos relajar la Regla 2? NO, el usuario dijo "ningún usuario tiene más de un HO a la semana".
-        // Entonces, si todos tienen 1, NADIE tiene HO hoy? -> Imposible, hay 5 días y 5 personas.
-        // Matemáticamente siempre debería haber alguien libre si son 5 y 5.
-        // Pero si hay feriados, la semana es corta.
-        // Si la semana tiene 3 días hábiles, sobran 2 personas.
-        // Si nadie cumple, buscamos a CUALQUIERA que cumpla Regla 2 (Semanal)
+        // Si nadie cumple la Regla 2 (Semanal)...
         if (!assignedPerson) {
-          assignedPerson = TEAM.find(p => state.weeklyCounts[p.id] === 0);
-        }
-
-        // Si AÚN así nadie puede (ej: semana de 6 días? imposible),
-        // rompemos la Regla 2 para asegurar cobertura (Regla Implícita: Alguien tiene que estar).
-        if (!assignedPerson) {
-          // Agarramos al que menos tiene en el mes
+          // 1. Intentamos respetar continuidad igualmente (rompiendo Regla 2? NO, user dijo Regla 2 es Oro)
+          // Pero user dijo "Regla 2: Ningún usuario > 1". Si todos tienen 1, entonces nadie puede?
+          // Se asigna al que menos tenga en la semana (si alguien tiene 0, ya lo hubieramos agarrado).
+          // Si todos tienen 1, y hay 5 personas y 5 días...
+          // Pero si es feriado, hay un hueco.
+          // Asignamos al que menos tenga en el MES.
           const minMonthly = Math.min(...Object.values(state.monthlyCounts));
           assignedPerson = TEAM.find(p => state.monthlyCounts[p.id] === minMonthly);
         }
@@ -248,28 +241,15 @@ function runSimulation() {
         state.monthlyCounts[assignedPerson.id]++;
         state.weeklyCounts[assignedPerson.id]++;
 
-        // Actualizar último asignado para rotación
         state.lastAssignedIndex = TEAM.findIndex(p => p.id === assignedPerson.id);
 
         // Gestión de Viernes (Regla 3)
         if (d.getDay() === 5) { // Viernes
           state.pendingFridayUser = assignedPerson;
         } else {
-          // Si asignamos Lunes (o Martes post-feriado), consumimos la prioridad
-          // PERO solo si la persona asignada ERA la pendiente.
-          if (state.pendingFridayUser && state.pendingFridayUser.id === assignedPerson.id) {
-            state.pendingFridayUser = null;
-          }
-          // Si el asignado NO era el pendiente (ej: override), el pendiente sigue esperando su turno?
-          // La regla "Usuario del Viernes vuelve el Lunes" implica continuidad inmediata.
-          // Si el Lunes hay override, se rompe la cadena.
-          else if (state.pendingFridayUser && overrides[dateStr]) {
-            state.pendingFridayUser = null; // Se rompió la cadena por fuerza mayor
-          }
-          // Si fue un día normal (Martes, Miercoles), no tocamos el pendiente 
-          // (aunque el pendiente solo debería sobrevivir al fin de semana/feriado lunes)
-          // Limpiamos pendiente si ya pasó su oportunidad (lunes/martes)
-          if (d.getDay() > 2) state.pendingFridayUser = null;
+          // Si asignamos un día hábil (Lunes, Martes...), consumimos la prioridad
+          // PERO solo si realmente la usamos.
+          state.pendingFridayUser = null;
         }
       }
     }
@@ -297,7 +277,7 @@ function getMonthlyStats(days) {
   TEAM.forEach(t => stats[t.id] = 0);
   days.forEach(day => {
     if (day && day.person && !day.isHoliday && day.date.getDay() !== 0 && day.date.getDay() !== 6) {
-      stats[day.person.id]++;
+      if (day.person && day.person.id) stats[day.person.id]++;
     }
   });
   return TEAM.map(t => ({ ...t, count: stats[t.id] })).sort((a, b) => b.count - a.count);
