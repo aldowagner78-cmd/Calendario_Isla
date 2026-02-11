@@ -12,6 +12,7 @@ const TEAM = [
 ];
 
 // Fecha de inicio de la rotación (Lunes 9 de Feb 2026)
+// El orden inicial es implícito en el TEAM array (0..4)
 const START_DATE = new Date('2026-02-09T00:00:00');
 
 const DAYS_ES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
@@ -40,18 +41,21 @@ function toggleDarkMode() {
 // Overrides ahora vienen de Firebase
 let overrides = {};
 let isLoadingOverrides = true;
+let simulationCache = {}; // Cache de asignaciones { 'YYYY-MM-DD': personId }
 
 // Cargar overrides iniciales y suscribirse
 (async () => {
   try {
     overrides = await getOverridesRemote();
     isLoadingOverrides = false;
+    runSimulation(); // Recalcular todo al cargar overrides
     render();
   } catch (e) {
     console.error('Error cargando overrides de Firebase:', e);
     // Fallback a LocalStorage si falla Firebase
     overrides = JSON.parse(localStorage.getItem('isla_bonita_overrides')) || {};
     isLoadingOverrides = false;
+    runSimulation();
     render();
   }
 })();
@@ -61,6 +65,8 @@ subscribeOverrides(async () => {
     const newOverrides = await getOverridesRemote();
     if (JSON.stringify(newOverrides) !== JSON.stringify(overrides)) {
       overrides = newOverrides;
+      simulationCache = {}; // Limpiar cache para forzar recalculo
+      runSimulation();
       showLocalNotification('🔄 Calendario actualizado remotamente');
       render();
     }
@@ -75,6 +81,8 @@ async function saveOverride(dateString, personId) {
 
     // Optimista: Actualizar local mientras llega la confirmación
     overrides[dateString] = personId;
+    simulationCache = {}; // Invalidar simulación
+    runSimulation(); // Recalcular futuro con este cambio
     render();
 
     const person = TEAM.find(p => p.id === personId);
@@ -114,54 +122,120 @@ function isWorkingDay(date) {
   return !isHoliday(date);
 }
 
-// Calcula cuántos días hábiles pasaron desde el inicio hasta la fecha dada
-function getWorkingDayIndex(targetDate) {
-  let count = 0;
+// --- SIMULACIÓN DE EQUIDAD MENSUAL ---
+// Esta es la "magia" para asegurar que nadie tenga 5 días si otro tiene 3.
+function runSimulation() {
+  simulationCache = {};
+
+  // Empezamos desde un día antes del inicio para tener un "lastIndex" inicial
+  // Asumimos que antes del inicio terminamos en el último del array (Aldo), para que empiece Machi.
+  let lastPersonIndex = TEAM.length - 1;
+
+  // Simulamos hasta 2 años en el futuro para cubrir cualquier vista
+  const endDate = new Date(START_DATE);
+  endDate.setFullYear(endDate.getFullYear() + 2);
+
   let currentDate = new Date(START_DATE);
-
-  // Normalizar fechas a medianoche
   currentDate.setHours(0, 0, 0, 0);
-  const target = new Date(targetDate);
-  target.setHours(0, 0, 0, 0);
 
-  if (target < currentDate) return -1;
+  // Estado del mes actual
+  let currentMonthStr = "";
+  let monthlyCounts = {}; // { personId: count }
 
-  while (currentDate < target) {
-    if (isWorkingDay(currentDate)) {
-      count++;
+  while (currentDate <= endDate) {
+    const dateStr = currentDate.toISOString().split('T')[0];
+    const monthStr = dateStr.substring(0, 7); // YYYY-MM
+
+    // Detectar cambio de mes: Reiniciar contadores equidad
+    if (monthStr !== currentMonthStr) {
+      currentMonthStr = monthStr;
+      monthlyCounts = {};
+      TEAM.forEach(p => monthlyCounts[p.id] = 0);
     }
+
+    // Si no trabajamos, saltamos (pero mantenemos el lastPersonIndex para continuidad)
+    // No, los feriados/findes no se asignan.
+    if (isWorkingDay(currentDate)) {
+
+      let assignedPersonId = null;
+
+      // 1. CHEQUEAR OVERRIDE (Fuerza Mayor)
+      if (overrides[dateStr]) {
+        assignedPersonId = overrides[dateStr];
+        // Actualizar índice para que la rotación continúe desde este si es posible
+        const idx = TEAM.findIndex(p => p.id === assignedPersonId);
+        if (idx >= 0) lastPersonIndex = idx;
+
+      } else {
+        // 2. ALGORITMO DE EQUIDAD + CONTINUIDAD
+
+        // Candidatos: Aquellos con el MÍNIMO de días asignados este mes
+        const minCount = Math.min(...Object.values(monthlyCounts));
+        const candidates = TEAM.filter(p => monthlyCounts[p.id] === minCount);
+
+        // De los candidatos, ¿cuál es el "Siguiente Lógico" en la rotación?
+        // El siguiente lógico es (last + 1) % 5
+        const naturalNextIndex = (lastPersonIndex + 1) % TEAM.length;
+        const naturalNextPerson = TEAM[naturalNextIndex];
+
+        // ¿Está el "Siguiente Lógico" entre los candidatos justos?
+        const isNaturalCandidate = candidates.some(c => c.id === naturalNextPerson.id);
+
+        if (isNaturalCandidate) {
+          // ¡Perfecto! El orden natural respeta la equidad.
+          assignedPersonId = naturalNextPerson.id;
+          lastPersonIndex = naturalNextIndex;
+        } else {
+          // Conflicto: El orden natural rompería la equidad (ya tiene muchos días).
+          // Debemos elegir a otro de los candidatos (el "más cercano" en rotación).
+          // Buscamos el primer candidato avanzando en la lista desde naturalNext
+          let bestCandidate = candidates[0]; // Fallback
+
+          for (let i = 0; i < TEAM.length; i++) {
+            const idx = (naturalNextIndex + i) % TEAM.length;
+            const p = TEAM[idx];
+            if (candidates.some(c => c.id === p.id)) {
+              bestCandidate = p;
+              lastPersonIndex = idx;
+              break;
+            }
+          }
+          assignedPersonId = bestCandidate.id;
+        }
+      }
+
+      // Guardar asignación y actualizar contadores
+      if (assignedPersonId) {
+        simulationCache[dateStr] = assignedPersonId;
+        monthlyCounts[assignedPersonId]++;
+      }
+    }
+
+    // Avanzar un día
     currentDate.setDate(currentDate.getDate() + 1);
   }
-  return count;
 }
 
+// Función principal de acceso (ahora lee de la simulación)
 function getHomeOfficePerson(date) {
   const dateStr = date.toISOString().split('T')[0];
 
-  // 0. Revisar si es anterior al inicio
+  // 0. Guardas básicas
   if (date < START_DATE) return null;
-
-  // 1. Revisar override
-  if (overrides && overrides[dateStr]) {
-    return TEAM.find(p => p.id === overrides[dateStr]);
-  }
-
-  // 2. Revisar si es fin de semana o feriado
   if (!isWorkingDay(date)) return null;
 
-  // 3. Calcular rotación con desplazamiento semanal
-  // Lógica: Cada semana la rotación se desplaza -1 (El que estaba el Viernes pasa al Lunes)
-  const workingDayIndex = getWorkingDayIndex(date);
+  // 1. Si no hay cache (primera carga o error), correr simulación
+  if (Object.keys(simulationCache).length === 0) {
+    runSimulation();
+  }
 
-  // Calcular semanas pasadas desde el inicio para el shift
-  const diffTime = date.getTime() - START_DATE.getTime();
-  const weeksDiff = Math.floor(diffTime / (7 * 24 * 60 * 60 * 1000));
+  // 2. Leer de cache
+  const personId = simulationCache[dateStr];
+  if (personId) {
+    return TEAM.find(p => p.id === personId);
+  }
 
-  // Fórmula: (IndiceDiaLaboral - SemanasTranscurridas) % 5
-  // Usamos lógica de módulo positivo para evitar negativos
-  const personIndex = ((workingDayIndex - weeksDiff) % 5 + 5) % 5;
-
-  return TEAM[personIndex];
+  return null;
 }
 
 function getWeekDays(date) {
