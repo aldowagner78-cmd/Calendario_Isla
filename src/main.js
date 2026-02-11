@@ -69,9 +69,13 @@ function getHomeOfficePerson(date) {
   // 2. Revisar si es fin de semana o feriado
   if (!isWorkingDay(date)) return null;
 
-  // 3. Calcular rotación basada en días hábiles acumulados
+  // 3. Calcular rotación con desplazamiento semanal
+  // Cada ciclo de 5 días hábiles, el orden se desplaza 1 posición
+  // Así nadie repite siempre el mismo día de la semana
   const workingDayIndex = getWorkingDayIndex(date);
-  const personIndex = workingDayIndex % 5;
+  const cycle = Math.floor(workingDayIndex / 5);
+  const positionInCycle = workingDayIndex % 5;
+  const personIndex = (positionInCycle + cycle) % 5;
 
   return TEAM[personIndex];
 }
@@ -119,7 +123,100 @@ function goToToday() {
   render();
 }
 
+function prevMonth() {
+  currentViewDate.setMonth(currentViewDate.getMonth() - 1);
+  render();
+}
+
+function nextMonth() {
+  currentViewDate.setMonth(currentViewDate.getMonth() + 1);
+  render();
+}
+
 // --- RENDERIZADO ---
+
+// Mini-calendario mensual
+function renderMonthCalendar(viewDate) {
+  const year = viewDate.getFullYear();
+  const month = viewDate.getMonth();
+  const MONTHS_FULL = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+
+  // Primer día del mes y cuántos días tiene
+  const firstDay = new Date(year, month, 1);
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  // Día de la semana del 1ro (0=Dom, ajustar a Lun=0)
+  let startWeekday = firstDay.getDay(); // 0=Dom
+  startWeekday = startWeekday === 0 ? 6 : startWeekday - 1; // Lun=0, Mar=1... Dom=6
+
+  // Generar datos de cada día
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const dayCells = [];
+  const hoCount = {}; // {personId: count}
+  TEAM.forEach(p => hoCount[p.id] = 0);
+
+  // Celdas vacías antes del día 1
+  for (let i = 0; i < startWeekday; i++) {
+    dayCells.push('<div class="mcal-cell empty"></div>');
+  }
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const date = new Date(year, month, d);
+    date.setHours(0, 0, 0, 0);
+    const person = getHomeOfficePerson(date);
+    const isToday = date.getTime() === today.getTime();
+    const isWeekend = date.getDay() === 0 || date.getDay() === 6;
+    const holiday = isHoliday(date);
+
+    if (person) hoCount[person.id]++;
+
+    let cellClass = 'mcal-cell';
+    if (isToday) cellClass += ' mcal-today';
+    if (isWeekend || holiday) cellClass += ' mcal-off';
+
+    let content = `<span class="mcal-num">${d}</span>`;
+    if (person) {
+      content += `<span class="mcal-dot" style="background:${person.color}"></span>`;
+    }
+
+    dayCells.push(`<div class="${cellClass}">${content}</div>`);
+  }
+
+  // Resumen de HO por persona
+  const summaryItems = TEAM.map(p =>
+    `<div class="mcal-summary-item">
+      <span class="mcal-summary-dot" style="background:${p.color}"></span>
+      <span class="mcal-summary-name">${p.name}</span>
+      <span class="mcal-summary-count">${hoCount[p.id]}</span>
+    </div>`
+  ).join('');
+
+  return `
+    <div class="mcal-card">
+      <div class="mcal-header">
+        <button class="nav-btn" onclick="prevMonth()">❮</button>
+        <span class="mcal-title">${MONTHS_FULL[month]} ${year}</span>
+        <button class="nav-btn" onclick="nextMonth()">❯</button>
+      </div>
+      <div class="mcal-grid">
+        <div class="mcal-head">Lu</div>
+        <div class="mcal-head">Ma</div>
+        <div class="mcal-head">Mi</div>
+        <div class="mcal-head">Ju</div>
+        <div class="mcal-head">Vi</div>
+        <div class="mcal-head mcal-off-head">Sa</div>
+        <div class="mcal-head mcal-off-head">Do</div>
+        ${dayCells.join('')}
+      </div>
+      <div class="mcal-summary">
+        <h4 class="mcal-summary-title">Home Office del mes</h4>
+        ${summaryItems}
+      </div>
+    </div>
+  `;
+}
 
 const app = document.querySelector('#app');
 let selectedDayToSwap = null;
@@ -215,6 +312,8 @@ function render() {
         </div>
       </div>
 
+      ${renderMonthCalendar(currentViewDate)}
+
       <div id="install-banner" class="install-banner">
         <p>¿Instalar Isla Bonita?</p>
         <button id="btn-install" class="btn-install">Instalar</button>
@@ -274,6 +373,8 @@ window.confirmSwap = (personId) => {
 window.prevWeek = prevWeek;
 window.nextWeek = nextWeek;
 window.goToToday = goToToday;
+window.prevMonth = prevMonth;
+window.nextMonth = nextMonth;
 
 function setupEventListeners() {
   let deferredPrompt;

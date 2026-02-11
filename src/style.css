@@ -388,3 +388,141 @@ h1 {
   border-color: var(--palm);
   background: rgba(45, 90, 39, 0.05);
 }
+
+/* ===== Mini-Calendario Mensual ===== */
+.mcal-card {
+  background: var(--card-bg);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: var(--shadow);
+  padding: 20px;
+  margin-top: 20px;
+}
+
+.mcal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.mcal-title {
+  font-weight: 600;
+  font-size: 1rem;
+}
+
+.mcal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.mcal-head {
+  text-align: center;
+  font-size: 0.6rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  opacity: 0.5;
+  padding: 4px 0;
+}
+
+.mcal-off-head {
+  opacity: 0.3;
+}
+
+.mcal-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 2px;
+  border-radius: 8px;
+  min-height: 36px;
+  background: white;
+}
+
+.mcal-cell.empty {
+  background: transparent;
+}
+
+.mcal-cell.mcal-off {
+  background: #f5f5f0;
+  opacity: 0.5;
+}
+
+.mcal-cell.mcal-today {
+  background: var(--palm);
+  color: white;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(45, 90, 39, 0.3);
+}
+
+.mcal-cell.mcal-today .mcal-num {
+  color: white;
+}
+
+.mcal-num {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1;
+}
+
+.mcal-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 3px;
+}
+
+.mcal-cell.mcal-today .mcal-dot {
+  border: 1.5px solid white;
+}
+
+/* Resumen HO del mes */
+.mcal-summary {
+  margin-top: 15px;
+  padding-top: 15px;
+  border-top: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.mcal-summary-title {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: #999;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+
+.mcal-summary-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+}
+
+.mcal-summary-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.mcal-summary-name {
+  font-size: 0.8rem;
+  font-weight: 500;
+  flex: 1;
+}
+
+.mcal-summary-count {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--palm);
+  background: rgba(45, 90, 39, 0.08);
+  padding: 2px 10px;
+  border-radius: 12px;
+}
