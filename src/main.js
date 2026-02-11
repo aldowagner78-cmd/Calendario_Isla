@@ -267,6 +267,24 @@ async function verifyAdmin() {
   }
 }
 
+
+function isCurrentWeek(date) {
+  const now = new Date();
+  const startOfNow = new Date(now);
+  startOfNow.setHours(0, 0, 0, 0);
+  const day = startOfNow.getDay();
+  const diff = startOfNow.getDate() - day + (day === 0 ? -6 : 1);
+  startOfNow.setDate(diff);
+
+  const startOfView = new Date(date);
+  startOfView.setHours(0, 0, 0, 0);
+  const dayView = startOfView.getDay();
+  const diffView = startOfView.getDate() - dayView + (dayView === 0 ? -6 : 1);
+  startOfView.setDate(diffView);
+
+  return startOfNow.getTime() === startOfView.getTime();
+}
+
 // --- RENDERIZADO ---
 
 const app = document.querySelector('#app');
@@ -433,7 +451,6 @@ function render() {
   setupEventListeners();
 }
 
-// ... Resto de funciones auxiliares (isCurrentWeek, openSwapDialog, setupEventListeners)...
 // Re-declarar funciones globales para window
 window.openSwapDialog = async (dateStr) => {
   const isAuthorized = await verifyAdmin();
@@ -459,19 +476,32 @@ window.prevMonth = prevMonth;
 window.nextMonth = nextMonth;
 
 function setupEventListeners() {
-  // Check if listeners are already attached to avoid duplicates? 
-  // No, render replaces innerHTML so listeners on DOM elements are gone, but window events persist.
-  // We only attach window events for 'beforeinstallprompt' once ideally, but here simplicity is key.
-
-  // Actually, beforeinstallprompt should be outside render if possible, or checked.
-  // But for now it's fine.
-
   const btnInstall = document.querySelector('#btn-install');
   if (btnInstall) {
     btnInstall.addEventListener('click', () => {
-      // Logic for install
+      // Logic for install placeholder
+      if (window.deferredPrompt) {
+        window.deferredPrompt.prompt();
+        window.deferredPrompt.userChoice.then((choiceResult) => {
+          if (choiceResult.outcome === 'accepted') {
+            console.log('User accepted the install prompt');
+          } else {
+            console.log('User dismissed the install prompt');
+          }
+          window.deferredPrompt = null;
+          document.querySelector('#install-banner').style.display = 'none';
+        });
+      }
     });
   }
+
+  // Capture install prompt
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    window.deferredPrompt = e;
+    const banner = document.querySelector('#install-banner');
+    if (banner) banner.style.display = 'flex';
+  });
 
   const modal = document.querySelector('#swap-modal');
   const closeModal = document.querySelector('#close-modal');
@@ -482,10 +512,11 @@ function setupEventListeners() {
   }
 }
 
-// Service Worker Logic
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('sw.js');
+    navigator.serviceWorker.register('sw.js')
+      .then(reg => console.log('SW registrado', reg))
+      .catch(err => console.log('SW error', err));
   });
 }
 

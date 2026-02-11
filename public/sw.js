@@ -1,4 +1,4 @@
-const CACHE_NAME = 'isla-bonita-v6';
+const CACHE_NAME = 'isla-bonita-v7';
 const PRECACHE_ASSETS = [
     './',
     'index.html',
