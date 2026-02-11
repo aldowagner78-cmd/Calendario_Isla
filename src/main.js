@@ -70,12 +70,12 @@ function getHomeOfficePerson(date) {
   if (!isWorkingDay(date)) return null;
 
   // 3. Calcular rotación con desplazamiento semanal
-  // Cada ciclo de 5 días hábiles, el orden se desplaza 1 posición
-  // Así nadie repite siempre el mismo día de la semana
+  // Cada ciclo de 5 días hábiles, el orden se desplaza 1 posición hacia atrás
+  // Así el que tuvo Viernes pasa a Lunes la semana siguiente
   const workingDayIndex = getWorkingDayIndex(date);
   const cycle = Math.floor(workingDayIndex / 5);
   const positionInCycle = workingDayIndex % 5;
-  const personIndex = (positionInCycle + cycle) % 5;
+  const personIndex = ((positionInCycle - cycle) % 5 + 5) % 5;
 
   return TEAM[personIndex];
 }
