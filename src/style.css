@@ -6,7 +6,22 @@
   --trunk: #5D4037;
   --text: #1A2F1A;
   --card-bg: rgba(255, 255, 255, 0.7);
-  --shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
+  --text: #333333;
+  --card-bg: #FFFFFF;
+  --bg-color: #FDFCF0;
+  --shadow: rgba(0, 0, 0, 0.05);
+}
+
+.dark-mode {
+  --palm: #81C784;
+  /* Más claro para fondo oscuro */
+  --sand: #121212;
+  --sun: #FFD700;
+  --sea: #4DB6AC;
+  --text: #E0E0E0;
+  --card-bg: #1E1E1E;
+  --bg-color: #121212;
+  --shadow: rgba(0, 0, 0, 0.5);
 }
 
 * {
@@ -17,12 +32,15 @@
 }
 
 body {
-  font-family: 'Outfit', sans-serif;
-  background-color: var(--sand);
-  background-image:
-    radial-gradient(at 0% 0%, rgba(100, 196, 188, 0.1) 0, transparent 50%),
-    radial-gradient(at 100% 100%, rgba(255, 215, 0, 0.1) 0, transparent 50%);
+  font-family: 'DM Sans', sans-serif;
+  background-color: var(--bg-color);
   color: var(--text);
+  margin: 0;
+  padding: 0;
+  -webkit-font-smoothing: antialiased;
+  padding-bottom: 40px;
+  /* Espacio para banner instalacion */
+  transition: background-color 0.3s, color 0.3s;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -112,17 +130,17 @@ h1 {
 }
 
 .day-cell {
-  background: white;
-  height: 100px;
-  border-radius: 16px;
+  background: var(--card-bg);
+  border-radius: 12px;
+  padding: 10px 5px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.02);
-  transition: transform 0.2s, box-shadow 0.2s;
   cursor: pointer;
+  transition: all 0.2s;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  min-height: 80px;
 }
 
 .day-cell:active {

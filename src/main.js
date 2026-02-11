@@ -1,6 +1,5 @@
 import './style.css'
 import { isHoliday, getBirthday } from './holidays.js';
-import { saveOverrideRemote, getOverridesRemote, subscribeOverrides } from './firebase.js';
 
 // --- CONFIGURACIÓN DEL EQUIPO ---
 const TEAM = [
@@ -9,7 +8,7 @@ const TEAM = [
   { id: 3, name: 'Gaston', color: '#FFA000', initial: 'G' },  // Amber/Gold
   { id: 4, name: 'Romi', color: '#EF5350', initial: 'R' },    // Red
   { id: 5, name: 'Aldo', color: '#66BB6A', initial: 'A' }     // Green
-]; // Colores distintivos pero dentro de una paleta armoniosa
+];
 
 // Fecha de inicio de la rotación (Lunes 9 de Feb 2026)
 const START_DATE = new Date('2026-02-09T00:00:00');
@@ -19,43 +18,75 @@ const MONTHS_ES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep'
 
 // --- ESTADO DE LA APLICACIÓN ---
 let currentViewDate = new Date(); // Fecha que se está visualizando
+let darkMode = localStorage.getItem('isla_bonita_dark_mode') === 'true';
+
+// Aplicar modo oscuro al inicio
+if (darkMode) {
+  document.body.classList.add('dark-mode');
+}
+
+function toggleDarkMode() {
+  darkMode = !darkMode;
+  document.body.classList.toggle('dark-mode', darkMode);
+  localStorage.setItem('isla_bonita_dark_mode', darkMode);
+  render();
+}
 
 // --- LÓGICA DE NEGOCIO (CORE) ---
 
-// Cargar overrides desde Firebase
-let overrides = {};
-let isLoadingOverrides = true;
+// Cargar overrides del localStorage
+let overrides = JSON.parse(localStorage.getItem('isla_bonita_overrides')) || {};
 
-// Inicializar Firebase y cargar overrides
-(async () => {
-  try {
-    overrides = await getOverridesRemote();
-  } catch (e) {
-    console.error('Error cargando overrides:', e);
-  }
-  isLoadingOverrides = false;
-  render();
-  
-  // Suscribirse a cambios en tiempo real
-  subscribeOverrides(async () => {
-    try {
-      overrides = await getOverridesRemote();
-      scheduleCache = null;
-      render();
-    } catch (e) {
-      console.error('Error sincronizando:', e);
-    }
-  });
-})();
-
-async function saveOverride(dateString, personId) {
+function saveOverride(dateString, personId) {
   overrides[dateString] = personId;
-  scheduleCache = null;
+  localStorage.setItem('isla_bonita_overrides', JSON.stringify(overrides));
+
+  // Notificación Local
+  const person = TEAM.find(p => p.id === personId);
+  const [year, month, day] = dateString.split('-'); // YYYY-MM-DD
+  const dateObj = new Date(year, month - 1, day);
+  const dayName = DAYS_ES[dateObj.getDay()];
+
+  if (person) {
+    showLocalNotification(`Cambio confirmado: ${person.name} toma el ${dayName} ${day}`);
+  }
+
   render();
-  try {
-    await saveOverrideRemote(dateString, personId);
-  } catch (e) {
-    console.error('Error guardando override:', e);
+}
+
+function showLocalNotification(msg) {
+  // 1. Notificación Visual (Toast) - Siempre
+  const toast = document.createElement('div');
+  toast.innerText = msg;
+  toast.style.position = 'fixed';
+  toast.style.bottom = '80px'; // Encima del banner
+  toast.style.left = '50%';
+  toast.style.transform = 'translateX(-50%)';
+  toast.style.background = 'var(--palm)';
+  toast.style.color = 'var(--sand)';
+  toast.style.padding = '12px 24px';
+  toast.style.borderRadius = '50px';
+  toast.style.boxShadow = '0 4px 12px var(--shadow)';
+  toast.style.zIndex = '10000';
+  toast.style.fontSize = '0.9rem';
+  toast.style.fontWeight = '600';
+  toast.style.textAlign = 'center';
+  toast.style.minWidth = '280px';
+
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 4000);
+
+  // 2. Notificación del Navegador (Si se permite)
+  if (!('Notification' in window)) return;
+
+  if (Notification.permission === 'granted') {
+    new Notification('Isla Bonita', { body: msg, icon: 'logo.svg' });
+  } else if (Notification.permission !== 'denied') {
+    Notification.requestPermission().then(permission => {
+      if (permission === 'granted') {
+        new Notification('Isla Bonita', { body: msg, icon: 'logo.svg' });
+      }
+    });
   }
 }
 
@@ -66,97 +97,25 @@ function isWorkingDay(date) {
   return !isHoliday(date);
 }
 
-// Obtener el Lunes de la semana de una fecha
-function getMondayOfWeek(date) {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  const dow = d.getDay();
-  d.setDate(d.getDate() - (dow === 0 ? 6 : dow - 1));
-  return d;
-}
+// Calcula cuántos días hábiles pasaron desde el inicio hasta la fecha dada
+function getWorkingDayIndex(targetDate) {
+  let count = 0;
+  let currentDate = new Date(START_DATE);
 
-// --- SISTEMA DE ROTACIÓN EQUITATIVA ---
-// Computa el calendario completo semana por semana.
-// En cada semana:
-//   1) Se calcula el orden de rotación (el de Vie pasa a Lun la semana sig.)
-//   2) Si hay menos días hábiles que personas (por feriados),
-//      se priorizan quienes tienen MENOS días de HO acumulados.
-//   3) Los seleccionados se asignan a los días en su orden de rotación.
+  // Normalizar fechas a medianoche
+  currentDate.setHours(0, 0, 0, 0);
+  const target = new Date(targetDate);
+  target.setHours(0, 0, 0, 0);
 
-let scheduleCache = null;
+  if (target < currentDate) return -1;
 
-function computeFullSchedule() {
-  const schedule = {};
-  const hoCount = {};
-  TEAM.forEach(p => hoCount[p.id] = 0);
-
-  const startDate = new Date(START_DATE);
-  startDate.setHours(0, 0, 0, 0);
-
-  // Computar 2 años hacia adelante
-  const endDate = new Date();
-  endDate.setFullYear(endDate.getFullYear() + 2);
-
-  let monday = getMondayOfWeek(startDate);
-
-  while (monday <= endDate) {
-    // Días hábiles de esta semana
-    const workDays = [];
-    for (let i = 0; i < 5; i++) {
-      const d = new Date(monday);
-      d.setDate(monday.getDate() + i);
-      d.setHours(0, 0, 0, 0);
-      if (d >= startDate && isWorkingDay(d)) {
-        workDays.push(d);
-      }
+  while (currentDate < target) {
+    if (isWorkingDay(currentDate)) {
+      count++;
     }
-
-    if (workDays.length > 0) {
-      const weekNum = Math.round(
-        (monday.getTime() - startDate.getTime()) / (7 * 24 * 60 * 60 * 1000)
-      );
-
-      // Paso 1: ¿QUIÉN tiene HO esta semana?
-      // Priorizar a los que tienen menos días acumulados.
-      // Desempate por orden de rotación de la semana.
-      const candidates = [...TEAM].sort((a, b) => {
-        const diff = hoCount[a.id] - hoCount[b.id];
-        if (diff !== 0) return diff;
-        const rotA = (TEAM.indexOf(a) + weekNum) % 5;
-        const rotB = (TEAM.indexOf(b) + weekNum) % 5;
-        return rotA - rotB;
-      });
-
-      const selectedIds = new Set(
-        candidates.slice(0, workDays.length).map(p => p.id)
-      );
-
-      // Paso 2: ¿QUÉ DÍA le toca a cada uno? → en orden de rotación
-      const selectedInRotOrder = TEAM
-        .map(p => ({ person: p, rot: (TEAM.indexOf(p) + weekNum) % 5 }))
-        .filter(x => selectedIds.has(x.person.id))
-        .sort((a, b) => a.rot - b.rot)
-        .map(x => x.person);
-
-      for (let i = 0; i < workDays.length; i++) {
-        const ds = workDays[i].toISOString().split('T')[0];
-        schedule[ds] = selectedInRotOrder[i];
-        hoCount[selectedInRotOrder[i].id]++;
-      }
-    }
-
-    monday = new Date(monday);
-    monday.setDate(monday.getDate() + 7);
+    currentDate.setDate(currentDate.getDate() + 1);
   }
-
-  return schedule;
-}
-
-function getSchedule() {
-  if (!scheduleCache) {
-    scheduleCache = computeFullSchedule();
-  }
-  return scheduleCache;
+  return count;
 }
 
 function getHomeOfficePerson(date) {
@@ -167,12 +126,14 @@ function getHomeOfficePerson(date) {
     return TEAM.find(p => p.id === overrides[dateStr]);
   }
 
-  // 2. Fin de semana o feriado
+  // 2. Revisar si es fin de semana o feriado
   if (!isWorkingDay(date)) return null;
 
-  // 3. Buscar en el calendario computado
-  const schedule = getSchedule();
-  return schedule[dateStr] || null;
+  // 3. Calcular rotación basada en días hábiles acumulados
+  const workingDayIndex = getWorkingDayIndex(date);
+  const personIndex = workingDayIndex % 5;
+
+  return TEAM[personIndex];
 }
 
 function getWeekDays(date) {
@@ -218,106 +179,14 @@ function goToToday() {
   render();
 }
 
-function prevMonth() {
-  currentViewDate.setMonth(currentViewDate.getMonth() - 1);
-  render();
-}
-
-function nextMonth() {
-  currentViewDate.setMonth(currentViewDate.getMonth() + 1);
-  render();
-}
-
 // --- RENDERIZADO ---
-
-// Mini-calendario mensual
-function renderMonthCalendar(viewDate) {
-  const year = viewDate.getFullYear();
-  const month = viewDate.getMonth();
-  const MONTHS_FULL = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
-
-  // Primer día del mes y cuántos días tiene
-  const firstDay = new Date(year, month, 1);
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-
-  // Día de la semana del 1ro (0=Dom, ajustar a Lun=0)
-  let startWeekday = firstDay.getDay(); // 0=Dom
-  startWeekday = startWeekday === 0 ? 6 : startWeekday - 1; // Lun=0, Mar=1... Dom=6
-
-  // Generar datos de cada día
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const dayCells = [];
-  const hoCount = {}; // {personId: count}
-  TEAM.forEach(p => hoCount[p.id] = 0);
-
-  // Celdas vacías antes del día 1
-  for (let i = 0; i < startWeekday; i++) {
-    dayCells.push('<div class="mcal-cell empty"></div>');
-  }
-
-  for (let d = 1; d <= daysInMonth; d++) {
-    const date = new Date(year, month, d);
-    date.setHours(0, 0, 0, 0);
-    const person = getHomeOfficePerson(date);
-    const isToday = date.getTime() === today.getTime();
-    const isWeekend = date.getDay() === 0 || date.getDay() === 6;
-    const holiday = isHoliday(date);
-
-    if (person) hoCount[person.id]++;
-
-    let cellClass = 'mcal-cell';
-    if (isToday) cellClass += ' mcal-today';
-    if (isWeekend || holiday) cellClass += ' mcal-off';
-
-    let content = `<span class="mcal-num">${d}</span>`;
-    if (person) {
-      content += `<span class="mcal-dot" style="background:${person.color}"></span>`;
-    }
-
-    dayCells.push(`<div class="${cellClass}">${content}</div>`);
-  }
-
-  // Resumen de HO por persona
-  const summaryItems = TEAM.map(p =>
-    `<div class="mcal-summary-item">
-      <span class="mcal-summary-dot" style="background:${p.color}"></span>
-      <span class="mcal-summary-name">${p.name}</span>
-      <span class="mcal-summary-count">${hoCount[p.id]}</span>
-    </div>`
-  ).join('');
-
-  return `
-    <div class="mcal-card">
-      <div class="mcal-header">
-        <button class="nav-btn" onclick="prevMonth()">❮</button>
-        <span class="mcal-title">${MONTHS_FULL[month]} ${year}</span>
-        <button class="nav-btn" onclick="nextMonth()">❯</button>
-      </div>
-      <div class="mcal-grid">
-        <div class="mcal-head">Lu</div>
-        <div class="mcal-head">Ma</div>
-        <div class="mcal-head">Mi</div>
-        <div class="mcal-head">Ju</div>
-        <div class="mcal-head">Vi</div>
-        <div class="mcal-head mcal-off-head">Sa</div>
-        <div class="mcal-head mcal-off-head">Do</div>
-        ${dayCells.join('')}
-      </div>
-      <div class="mcal-summary">
-        <h4 class="mcal-summary-title">Home Office del mes</h4>
-        ${summaryItems}
-      </div>
-    </div>
-  `;
-}
 
 const app = document.querySelector('#app');
 let selectedDayToSwap = null;
 
 function render() {
-  const now = new Date();
+  const now = new Date(new Date().setHours(0, 0, 0, 0));
+
   // Usar currentViewDate para la grilla
   const weekDays = getWeekDays(currentViewDate);
 
@@ -336,6 +205,10 @@ function render() {
   const weekYear = weekDays[0].date.getFullYear();
 
   app.innerHTML = `
+    <button class="theme-toggle" onclick="toggleDarkMode()">
+      ${darkMode ? '☀️' : '🌙'}
+    </button>
+
     <header>
       <div class="logo-container">
         <img src="logo.svg" alt="Isla Bonita">
@@ -360,8 +233,10 @@ function render() {
         <div class="week-grid">
           ${weekDays.map(day => `
             <div class="day-cell ${day.isToday ? 'active' : ''} ${day.isHoliday ? 'holiday' : ''}" 
-                 onclick="${!day.isHoliday ? `openSwapDialog('${day.dateStr}')` : ''}">
-              <div style="font-size: 0.7rem; font-weight: 700; margin-bottom: 2px;">
+                 onclick="${!day.isHoliday ? `openSwapDialog('${day.dateStr}')` : ''}"
+                 style="${!day.isHoliday && day.person ? `border-bottom: 3px solid ${day.person.color}` : ''}">
+              
+              <div style="font-size: 0.7rem; font-weight: 700; margin-bottom: 4px; opacity: 0.7;">
                 ${DAYS_ES[day.date.getDay()].substring(0, 3)} ${day.dayNum}
               </div>
               
@@ -369,12 +244,12 @@ function render() {
       ? '<div style="font-size: 1.5rem;">🇦🇷</div>'
       : day.birthday
         ? `<div class="user-avatar" style="background: #FFF0F5; color: #D81B60; border: 1px solid #FF69B4; font-size: 1.2rem;">🎂</div>`
-        : `<div class="user-avatar" style="${day.isToday ? '' : 'color: ' + day.person?.color}">
-                      ${day.person?.initial || '?'}
+        : `<div style="font-weight: 800; font-size: 0.9rem; color: ${day.person?.color || 'inherit'}; text-align: center; line-height: 1.1;">
+                      ${day.person?.name || '?'}
                      </div>`
     }
-              ${day.birthday ? `<div style="font-size: 0.5rem; color: #D81B60; margin-top: -5px; font-weight: 700;">Cumple ${day.birthday}</div>` : ''}
-              ${!day.isHoliday && !day.birthday && day.person ? `<div style="font-size: 0.6rem; opacity: 0.8;">${day.person.name}</div>` : ''}
+              
+              ${day.birthday ? `<div style="font-size: 0.5rem; color: #D81B60; font-weight: 700; margin-top: 2px;">Cumple</div>` : ''}
             </div>
           `).join('')}
         </div>
@@ -406,8 +281,6 @@ function render() {
           </div>
         </div>
       </div>
-
-      ${renderMonthCalendar(currentViewDate)}
 
       <div id="install-banner" class="install-banner">
         <p>¿Instalar Isla Bonita?</p>
@@ -457,19 +330,18 @@ window.openSwapDialog = (dateStr) => {
   document.querySelector('#swap-modal').style.display = 'flex';
 };
 
-window.confirmSwap = async (personId) => {
+window.confirmSwap = (personId) => {
   if (selectedDayToSwap) {
-    await saveOverride(selectedDayToSwap, personId);
+    saveOverride(selectedDayToSwap, personId);
     selectedDayToSwap = null;
     document.querySelector('#swap-modal').style.display = 'none';
   }
 };
 
+window.toggleDarkMode = toggleDarkMode;
 window.prevWeek = prevWeek;
 window.nextWeek = nextWeek;
 window.goToToday = goToToday;
-window.prevMonth = prevMonth;
-window.nextMonth = nextMonth;
 
 function setupEventListeners() {
   let deferredPrompt;
@@ -507,21 +379,14 @@ function setupEventListeners() {
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('sw.js')
-      .then(reg => {
-        console.log('SW registrado', reg);
-        // Forzar actualización del SW si hay una nueva versión
-        reg.update();
-      })
+      .then(reg => console.log('SW registrado', reg))
       .catch(err => console.log('SW error', err));
   });
 }
 
-// Mostrar loading mientras se carga Firebase
-if (isLoadingOverrides) {
-  try {
-    document.querySelector('#app').innerHTML = '<div style="padding:40px;text-align:center;"><div style="font-size:2rem;margin-bottom:10px;">🌴</div><p>Cargando...</p></div>';
-  } catch (e) {
-    console.error('Error inicial:', e);
-  }
+// Request notification permission on load
+if ('Notification' in window && Notification.permission !== 'granted' && Notification.permission !== 'denied') {
+  Notification.requestPermission();
 }
-// setInterval(render, 1000 * 60 * 60);
+
+render();
