@@ -138,6 +138,9 @@ function getWorkingDayIndex(targetDate) {
 function getHomeOfficePerson(date) {
   const dateStr = date.toISOString().split('T')[0];
 
+  // 0. Revisar si es anterior al inicio
+  if (date < START_DATE) return null;
+
   // 1. Revisar override
   if (overrides && overrides[dateStr]) {
     return TEAM.find(p => p.id === overrides[dateStr]);
@@ -219,6 +222,23 @@ function getMonthDays(date) {
   }
 
   return days;
+}
+
+// Helper para contar días por persona en el mes
+function getMonthlyStats(days) {
+  const stats = {};
+  TEAM.forEach(t => stats[t.id] = 0);
+
+  days.forEach(day => {
+    if (day && day.person && !day.isHoliday && day.date.getDay() !== 0 && day.date.getDay() !== 6) {
+      stats[day.person.id]++;
+    }
+  });
+
+  return TEAM.map(t => ({
+    ...t,
+    count: stats[t.id]
+  })).sort((a, b) => b.count - a.count); // Ordenar por quien tiene más
 }
 
 
@@ -427,12 +447,27 @@ function render() {
 
       return `
               <div class="mcal-cell ${day.isToday ? 'mcal-today' : ''} ${isWeekend ? 'mcal-off' : ''}"
-                   onclick="${(!isWeekend && !day.isHoliday) ? `openSwapDialog('${day.dateStr}')` : ''}">
+                   onclick="${(!isWeekend && !day.isHoliday && day.person) ? `openSwapDialog('${day.dateStr}')` : ''}">
                 <span class="mcal-num">${day.dayNum}</span>
                 ${content}
               </div>
             `;
     }).join('')}
+        </div>
+
+        <!-- RESUMEN MENSUAL -->
+        <div class="mcal-summary">
+          <div class="mcal-summary-title">Días Home Office (Estimado)</div>
+          ${(() => {
+      const stats = getMonthlyStats(monthDays); // Calcular stats
+      return stats.map(st => `
+              <div class="mcal-summary-item">
+                <div class="mcal-summary-dot" style="background-color: ${st.color}"></div>
+                <div class="mcal-summary-name">${st.name}</div>
+                <div class="mcal-summary-count" style="color: ${st.color}; background: ${st.color}20">${st.count}</div>
+              </div>
+            `).join('');
+    })()}
         </div>
       </div>
 
