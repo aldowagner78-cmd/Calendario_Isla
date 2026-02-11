@@ -48,38 +48,66 @@ subscribeOverrides(async () => {
   } catch (e) { }
 });
 
-async function saveOverride(dateString, personId) {
+// --- LÓGICA SMART SWAP ---
+async function saveOverride(dateString, newPersonId) {
   try {
-    // 1. Obtener quién estaba antes para la notificación
-    // Para simplificar, calculamos quién estaba asignado originalmente en esa fecha
-    const dateObj = new Date(dateString + 'T00:00:00');
-    // Usamos la lógica base para saber quién "debería" estar
-    // Ojo: si ya había un override, override[dateString] nos dice quién estaba.
-    // Pero getHomeOfficePerson ya usa overrides.
-    // Vamos a calcular el "original" ignorando overrides un segundo
-    const originalPerson = getHomeOfficePersonBase(dateObj); // Lógica pura
-    const previousOverrideId = overrides[dateString];
+    const targetDate = new Date(dateString + 'T00:00:00');
 
-    let previousName = originalPerson ? originalPerson.name : 'Nadie';
-    if (previousOverrideId) {
-      const prevObj = TEAM.find(p => p.id === previousOverrideId);
-      if (prevObj) previousName = prevObj.name;
+    // 1. Identificar quién está ACTUALMENTE en el día objetivo (antes del cambio)
+    const currentPerson = getHomeOfficePerson(targetDate);
+    const currentPersonId = currentPerson ? currentPerson.id : null;
+    const currentPersonName = currentPerson ? currentPerson.name : 'Nadie';
+
+    // 2. Identificar si la NUEVA persona ya tiene un día asignado esta semana
+    // Buscamos conflicto en la semana DE LA FECHA OBJETIVO (no de la vista actual)
+    const weekDays = getWeekDaysForLogic(targetDate);
+
+    let conflictDateStr = null;
+    let conflictDayName = '';
+
+    for (const d of weekDays) {
+      // Ignoramos el día objetivo (por si estamos re-guardando lo mismo)
+      if (d.dateStr === dateString) continue;
+
+      // Verificamos quién tiene este día
+      const p = getHomeOfficePerson(d.date);
+      if (p && p.id === newPersonId) {
+        conflictDateStr = d.dateStr;
+        conflictDayName = DAYS_ES[d.date.getDay()];
+        break;
+      }
     }
 
-    const newPerson = TEAM.find(p => p.id === personId);
+    const newPersonObj = TEAM.find(p => p.id === newPersonId);
 
-    // 2. Guardar
-    await saveOverrideRemote(dateString, personId);
-    overrides[dateString] = personId;
-    render();
+    if (conflictDateStr && currentPersonId) {
+      // --- CASO DE INTERCAMBIO (SWAP) ---
+      // El nuevo dueño (newPersonId) ya tiene un día (conflictDateStr).
+      // El dueño actual (currentPersonId) va a perder targetDate.
+      // SOLUCIÓN: currentPersonId se queda con conflictDateStr.
 
-    // 3. Notificación Mejorada
-    if (newPerson) {
-      showLocalNotification(`Cambio: ${newPerson.name} reemplaza a ${previousName}`);
+      // 1. Asignar targetDate a newPersonId
+      await saveOverrideRemote(dateString, newPersonId);
+      overrides[dateString] = newPersonId;
+
+      // 2. Asignar conflictDateStr a currentPersonId
+      await saveOverrideRemote(conflictDateStr, currentPersonId);
+      overrides[conflictDateStr] = currentPersonId;
+
+      render();
+      showLocalNotification(`🔀 Enroque: ${newPersonObj.name} toma el día de ${currentPersonName}, y ${currentPersonName} pasa al ${conflictDayName}.`);
+
+    } else {
+      // --- CASO SIMPLE ---
+      // No hay conflicto o no se puede hacer swap (ej: target estaba vacío).
+      await saveOverrideRemote(dateString, newPersonId);
+      overrides[dateString] = newPersonId;
+      render();
+      showLocalNotification(`Cambio guardado: ${newPersonObj.name}`);
     }
 
   } catch (e) {
-    showLocalNotification('❌ Error al guardar');
+    showLocalNotification('Error al guardar cambio');
     console.error(e);
   }
 }
@@ -92,10 +120,10 @@ function showLocalNotification(msg) {
     position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)',
     background: 'var(--palm)', color: 'var(--sand)', padding: '12px 24px',
     borderRadius: '50px', boxShadow: '0 4px 12px var(--shadow)', zIndex: '10000',
-    fontSize: '0.9rem', fontWeight: '600', textAlign: 'center', minWidth: '300px'
+    fontSize: '0.9rem', fontWeight: '600', textAlign: 'center', minWidth: '320px'
   });
   document.body.appendChild(toast);
-  setTimeout(() => toast.remove(), 4000);
+  setTimeout(() => toast.remove(), 5000); // Un poco más de tiempo para leer el enroque
 }
 
 function toggleDarkMode() {
@@ -132,15 +160,9 @@ function getWorkingDayIndex(date) {
     }
     d.setDate(d.getDate() + 1);
   }
-
-  // Si el día objetivo NO es laborable, retornamos -1 (no tiene índice de rotación)
-  // Pero si el loop termina en target, hemos contado los días ANTERIORES.
-  // El índice para "target" es "count" (0-based) si target es working day.
-
   return count;
 }
 
-// Función base sin overrides (para notificaciones)
 function getHomeOfficePersonBase(date) {
   if (date < START_DATE) return null;
   if (!isWorkingDay(date)) return null;
@@ -153,17 +175,33 @@ function getHomeOfficePersonBase(date) {
   return TEAM[idx % TEAM.length];
 }
 
-// Función principal con overrides
 function getHomeOfficePerson(date) {
   const dateStr = date.toISOString().split('T')[0];
 
-  // 1. Override
   if (overrides && overrides[dateStr]) {
     return TEAM.find(p => p.id === overrides[dateStr]);
   }
-
-  // 2. Lógica Base
   return getHomeOfficePersonBase(date);
+}
+
+// Helper para lógica de semana (independiente de la vista)
+function getWeekDaysForLogic(date) {
+  const start = new Date(date);
+  start.setHours(0, 0, 0, 0);
+  const day = start.getDay();
+  const diff = start.getDate() - day + (day === 0 ? -6 : 1); // Lunes
+  start.setDate(diff);
+
+  const days = [];
+  for (let i = 0; i < 5; i++) { // Solo Lun-Vie
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    days.push({
+      date: d,
+      dateStr: d.toISOString().split('T')[0]
+    });
+  }
+  return days;
 }
 
 
