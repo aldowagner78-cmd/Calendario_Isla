@@ -1,0 +1,291 @@
+:root {
+  --sand: #FDFCF0;
+  --palm: #2D5A27;
+  --sea: #64C4BC;
+  --sun: #FFD700;
+  --trunk: #5D4037;
+  --text: #1A2F1A;
+  --card-bg: rgba(255, 255, 255, 0.7);
+  --shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  font-family: 'Outfit', sans-serif;
+  background-color: var(--sand);
+  background-image: 
+    radial-gradient(at 0% 0%, rgba(100, 196, 188, 0.1) 0, transparent 50%),
+    radial-gradient(at 100% 100%, rgba(255, 215, 0, 0.1) 0, transparent 50%);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow-x: hidden;
+}
+
+#app {
+  width: 100%;
+  max-width: 500px;
+  margin: 0 auto;
+  padding: 20px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Header */
+header {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 30px;
+  padding: 10px 0;
+}
+
+.logo-container {
+  width: 50px;
+  height: 50px;
+  background: white;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow);
+}
+
+.logo-container img {
+  width: 40px;
+  height: 40px;
+}
+
+h1 {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--palm);
+  letter-spacing: -0.5px;
+}
+
+/* Calendar Card */
+.calendar-card {
+  background: var(--card-bg);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-radius: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  box-shadow: var(--shadow);
+  padding: 20px;
+  margin-bottom: 20px;
+}
+
+.calendar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.calendar-title {
+  font-weight: 600;
+  font-size: 1.1rem;
+}
+
+.today-chip {
+  background: var(--sea);
+  color: white;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+/* Week Days */
+.week-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10px;
+}
+
+.day-cell {
+  background: white;
+  height: 100px;
+  border-radius: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: 0 4px 6px rgba(0,0,0,0.02);
+  transition: transform 0.2s, box-shadow 0.2s;
+  cursor: pointer;
+}
+
+.day-cell:active {
+  transform: scale(0.95);
+}
+
+.day-cell.active {
+  background: var(--palm);
+  color: white;
+  box-shadow: 0 8px 15px rgba(45, 90, 39, 0.2);
+}
+
+.day-name {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  font-weight: 600;
+  opacity: 0.6;
+}
+
+.day-cell.active .day-name {
+  opacity: 0.9;
+}
+
+.user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: #eee;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #666;
+}
+
+.day-cell.active .user-avatar {
+  background: rgba(255,255,255,0.2);
+  color: white;
+}
+
+/* Next Up Section */
+.info-section {
+  margin-top: 10px;
+}
+
+.card {
+  background: white;
+  padding: 15px;
+  border-radius: 20px;
+  margin-bottom: 15px;
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.03);
+}
+
+.icon-box {
+  width: 45px;
+  height: 45px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+}
+
+.bg-palm { background: rgba(45, 90, 39, 0.1); color: var(--palm); }
+.bg-sea { background: rgba(100, 196, 188, 0.1); color: var(--sea); }
+.bg-sun { background: rgba(255, 215, 0, 0.1); color: #B09500; }
+
+.card-content h3 {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.card-content p {
+  font-size: 0.8rem;
+  opacity: 0.7;
+}
+
+/* Install Banner */
+.install-banner {
+  background: var(--palm);
+  color: white;
+  padding: 15px;
+  border-radius: 16px;
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: auto;
+  animation: slideUp 0.5s ease;
+}
+
+.btn-install {
+  background: white;
+  color: var(--palm);
+  border: none;
+  padding: 8px 16px;
+  border-radius: 10px;
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+@keyframes slideUp {
+  from { transform: translateY(100px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* Swapping UI */
+.swap-modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(45, 90, 39, 0.4);
+  backdrop-filter: blur(5px);
+  z-index: 100;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.modal-content {
+  background: white;
+  width: 100%;
+  max-width: 400px;
+  border-radius: 28px;
+  padding: 30px;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.2);
+}
+
+.modal-title {
+  font-size: 1.3rem;
+  font-weight: 600;
+  margin-bottom: 20px;
+  text-align: center;
+}
+
+.team-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.team-item {
+  padding: 12px;
+  border: 1px solid #eee;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.team-item:hover {
+  background: #f9f9f9;
+}
+
+.team-item.selected {
+  border-color: var(--palm);
+  background: rgba(45, 90, 39, 0.05);
+}
