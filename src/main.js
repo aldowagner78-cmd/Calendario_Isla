@@ -2,11 +2,11 @@ import './style.css'
 
 // --- CONFIGURACIÓN DEL EQUIPO ---
 const TEAM = [
-  { id: 1, name: 'Juan', color: '#64C4BC', initial: 'J' },
-  { id: 2, name: 'María', color: '#2D5A27', initial: 'M' },
-  { id: 3, name: 'Pedro', color: '#FFD700', initial: 'P' },
-  { id: 4, name: 'Ana', color: '#5D4037', initial: 'A' },
-  { id: 5, name: 'Luis', color: '#64C4BC', initial: 'L' }
+  { id: 1, name: 'Machi', color: '#64C4BC', initial: 'M' },
+  { id: 2, name: 'Profesor', color: '#2D5A27', initial: 'P' },
+  { id: 3, name: 'Gaston', color: '#FFD700', initial: 'G' },
+  { id: 4, name: 'Romi', color: '#5D4037', initial: 'R' },
+  { id: 5, name: 'Aldo', color: '#64C4BC', initial: 'A' }
 ];
 
 // Fecha de inicio de la rotación (debe ser un lunes)
