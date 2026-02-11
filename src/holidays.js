@@ -40,8 +40,24 @@ export const HOLIDAYS_2026 = [
     '2026-12-25', // Navidad
 ];
 
+// Lista de cumpleaños del equipo (Formato ignorando el año para facilitar la lógica si se extiende)
+// Pero mantendremos el formato YYYY-MM-DD para 2026 por consistencia
+export const BIRTHDAYS_2026 = {
+    '2026-10-22': 'Aldo',   // 22/10
+    '2026-06-25': 'Gaston', // 25/06
+    '2026-01-28': 'Machi',  // 28/01
+    '2026-07-25': 'Fabi',   // 25/07 (Antes Profesor)
+    '2026-12-01': 'Romi'    // 01/12
+};
+
 // Función helper para chequear feriados
 export function isHoliday(date) {
     const dateStr = date.toISOString().split('T')[0];
     return HOLIDAYS_2026.includes(dateStr);
+}
+
+// Función helper para chequear cumpleaños
+export function getBirthday(date) {
+    const dateStr = date.toISOString().split('T')[0];
+    return BIRTHDAYS_2026[dateStr] || null;
 }

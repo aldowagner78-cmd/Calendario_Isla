@@ -1,20 +1,19 @@
 import './style.css'
-import { isHoliday } from './holidays.js';
+import { isHoliday, getBirthday } from './holidays.js';
 
 // --- CONFIGURACIÓN DEL EQUIPO ---
 const TEAM = [
-  { id: 1, name: 'Machi', color: '#64C4BC', initial: 'M' },
-  { id: 2, name: 'Profesor', color: '#2D5A27', initial: 'P' },
-  { id: 3, name: 'Gaston', color: '#FFD700', initial: 'G' },
-  { id: 4, name: 'Romi', color: '#5D4037', initial: 'R' },
-  { id: 5, name: 'Aldo', color: '#64C4BC', initial: 'A' }
-];
+  { id: 1, name: 'Machi', color: '#26C6DA', initial: 'M' },   // Cyan
+  { id: 2, name: 'Fabi', color: '#7E57C2', initial: 'F' },    // Deep Purple
+  { id: 3, name: 'Gaston', color: '#FFA000', initial: 'G' },  // Amber/Gold
+  { id: 4, name: 'Romi', color: '#EF5350', initial: 'R' },    // Red
+  { id: 5, name: 'Aldo', color: '#66BB6A', initial: 'A' }     // Green
+]; // Colores distintivos pero dentro de una paleta armoniosa
 
 // Fecha de inicio de la rotación (Lunes 9 de Feb 2026)
 const START_DATE = new Date('2026-02-09T00:00:00');
 
 const DAYS_ES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-//const MONTHS_ES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 const MONTHS_ES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
 
 // --- ESTADO DE LA APLICACIÓN ---
@@ -96,6 +95,7 @@ function getWeekDays(date) {
       dayNum: d.getDate(),
       person: getHomeOfficePerson(d),
       isHoliday: isHoliday(d),
+      birthday: getBirthday(d), // Chequear si es cumple
       isToday: d.toDateString() === new Date().toDateString()
     });
   }
@@ -169,13 +169,20 @@ function render() {
           ${weekDays.map(day => `
             <div class="day-cell ${day.isToday ? 'active' : ''} ${day.isHoliday ? 'holiday' : ''}" 
                  onclick="${!day.isHoliday ? `openSwapDialog('${day.dateStr}')` : ''}">
-              <span class="day-name">${DAYS_ES[day.date.getDay()].substring(0, 3)} ${day.dayNum}</span>
+              <div style="font-size: 0.7rem; font-weight: 700; margin-bottom: 2px;">
+                ${DAYS_ES[day.date.getDay()].substring(0, 3)} ${day.dayNum}
+              </div>
+              
               ${day.isHoliday
       ? '<div style="font-size: 1.5rem;">🇦🇷</div>'
-      : `<div class="user-avatar" style="${day.isToday ? '' : 'color: ' + day.person?.color}">
-                    ${day.person?.initial || '?'}
-                   </div>`
+      : day.birthday
+        ? `<div class="user-avatar" style="background: #FFF0F5; color: #D81B60; border: 1px solid #FF69B4; font-size: 1.2rem;">🎂</div>`
+        : `<div class="user-avatar" style="${day.isToday ? '' : 'color: ' + day.person?.color}">
+                      ${day.person?.initial || '?'}
+                     </div>`
     }
+              ${day.birthday ? `<div style="font-size: 0.5rem; color: #D81B60; margin-top: -5px; font-weight: 700;">Cumple ${day.birthday}</div>` : ''}
+              ${!day.isHoliday && !day.birthday && day.person ? `<div style="font-size: 0.6rem; opacity: 0.8;">${day.person.name}</div>` : ''}
             </div>
           `).join('')}
         </div>
@@ -187,7 +194,7 @@ function render() {
           <div class="icon-box bg-palm">🏠</div>
           <div class="card-content">
             <h3 class="label-small">Hoy le toca:</h3>
-            <p class="name-big">${todayPerson ? todayPerson.name : 'Nadie (Ferial/Finde)'}</p>
+            <p class="name-big">${todayPerson ? todayPerson.name : 'Nadie (Feriado/Finde)'}</p>
           </div>
         </div>
 
