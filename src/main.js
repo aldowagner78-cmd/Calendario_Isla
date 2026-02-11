@@ -84,8 +84,15 @@ function showLocalNotification(msg) {
   setTimeout(() => toast.remove(), 4000);
 }
 
+function toggleDarkMode() {
+  darkMode = !darkMode;
+  document.body.classList.toggle('dark-mode', darkMode);
+  localStorage.setItem('isla_bonita_dark_mode', darkMode);
+  render();
+}
+
 // ==========================================
-// === ALGORITMO DE SIMULACIÓN (VTO USER) ===
+// === ALGORITMO DE SIMULACIÓN (V13 FIX) ===
 // ==========================================
 
 function runSimulation() {
@@ -129,7 +136,6 @@ function runSimulation() {
         // B. Selección de Candidato
 
         // Regla 2: Continuidad (Con corrección de feriados: usamos pendingFridayUserIndex)
-        // Si hay alguien pendiente del viernes anterior, es el candidato prioritario.
         if (state.pendingFridayUserIndex !== -1) {
           assignedPersonIndex = state.pendingFridayUserIndex;
         } else {
@@ -166,7 +172,7 @@ function runSimulation() {
   }
 }
 
-// Helper: Aplica Regla de Equidad (Max - Min <= 1)
+
 function applyEquityRule(candidateIndex, counts) {
   const candidateId = TEAM[candidateIndex].id;
 
@@ -181,7 +187,7 @@ function applyEquityRule(candidateIndex, counts) {
   // SI SE ROMPE LA EQUIDAD
   if ((max - min) > 1) {
     // Buscar reemplazo: Alguien que tenga el mínimo actual
-    // (Priorizamos el primero en la lista para simplificar, según lógica de User)
+    // Priorizamos el primero en la lista (según lógica simple)
     const currentMin = Math.min(...Object.values(counts));
     const replacementIndex = TEAM.findIndex(p => counts[p.id] === currentMin);
     return replacementIndex;
@@ -393,8 +399,9 @@ function render() {
       </div>
     </div>
   `;
-  setupEvents();
 }
+
+// --- GLOBAL EXPORTS (WINDOW) ---
 
 function verifyAdmin() {
   if (isAdmin) return Promise.resolve(true);
@@ -417,30 +424,67 @@ function verifyAdmin() {
   });
 }
 
-function setupEvents() {
-  window.toggleDarkMode = toggleDarkMode;
-  window.prevWeek = () => { currentViewDate.setDate(currentViewDate.getDate() - 7); render(); };
-  window.nextWeek = () => { currentViewDate.setDate(currentViewDate.getDate() + 7); render(); };
-  window.prevMonth = () => { currentMonthViewDate.setMonth(currentMonthViewDate.getMonth() - 1); render(); };
-  window.nextMonth = () => { currentMonthViewDate.setMonth(currentMonthViewDate.getMonth() + 1); render(); };
-  window.goToToday = () => { currentViewDate = new Date(); currentMonthViewDate = new Date(); render(); };
+function prevWeek() { currentViewDate.setDate(currentViewDate.getDate() - 7); render(); }
+function nextWeek() { currentViewDate.setDate(currentViewDate.getDate() + 7); render(); }
+function prevMonth() { currentMonthViewDate.setMonth(currentMonthViewDate.getMonth() - 1); render(); }
+function nextMonth() { currentMonthViewDate.setMonth(currentMonthViewDate.getMonth() + 1); render(); }
+function goToToday() { currentViewDate = new Date(); currentMonthViewDate = new Date(); render(); }
 
-  window.openSwapDialog = async (ds) => {
-    if (await verifyAdmin()) {
-      window.selectedDay = ds;
-      document.getElementById('swap-modal').style.display = 'flex';
-    }
-  };
-  window.confirmSwap = (pid) => {
-    if (window.selectedDay) {
-      saveOverride(window.selectedDay, pid);
+window.toggleDarkMode = toggleDarkMode;
+window.prevWeek = prevWeek;
+window.nextWeek = nextWeek;
+window.prevMonth = prevMonth;
+window.nextMonth = nextMonth;
+window.goToToday = goToToday;
+
+window.openSwapDialog = async (ds) => {
+  if (await verifyAdmin()) {
+    window.selectedDay = ds;
+    document.getElementById('swap-modal').style.display = 'flex';
+  }
+};
+
+window.confirmSwap = (pid) => {
+  if (window.selectedDay) {
+    saveOverride(window.selectedDay, pid);
+    document.getElementById('swap-modal').style.display = 'none';
+  }
+};
+
+window.onload = () => {
+  const close = document.getElementById('close-modal');
+  // Esto podría fallar si swap modal no está renderizado al cargar
+  // Mejor hacerlo delegando o en render?
+  // En mi estructura actual, render se llama al final.
+  // Pero el click en close-modal requiere que el elemento exista.
+  // Agregar event listener al contenedor global es más seguro.
+  document.addEventListener('click', (e) => {
+    if (e.target && e.target.id == 'close-modal') {
       document.getElementById('swap-modal').style.display = 'none';
     }
-  };
+  });
 
-  const close = document.getElementById('close-modal');
-  if (close) close.onclick = () => document.getElementById('swap-modal').style.display = 'none';
-}
+  // Installer
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    window.deferredPrompt = e;
+    const banner = document.querySelector('#install-banner');
+    if (banner) banner.style.display = 'flex';
+  });
+
+  // Install Click
+  document.addEventListener('click', (e) => {
+    if (e.target && e.target.id == 'btn-install') {
+      if (window.deferredPrompt) {
+        window.deferredPrompt.prompt();
+        window.deferredPrompt.userChoice.then((choiceResult) => {
+          window.deferredPrompt = null;
+          document.querySelector('#install-banner').style.display = 'none';
+        });
+      }
+    }
+  });
+};
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 render();
