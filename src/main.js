@@ -26,13 +26,16 @@ if (darkMode) document.body.classList.add('dark-mode');
 
 // --- OVERRIDES ---
 let overrides = {};
+let simulationCache = {};
 
 (async () => {
   try {
     overrides = await getOverridesRemote();
+    runSimulation();
     render();
   } catch (e) {
     overrides = JSON.parse(localStorage.getItem('isla_bonita_overrides')) || {};
+    runSimulation();
     render();
   }
 })();
@@ -42,72 +45,31 @@ subscribeOverrides(async () => {
     const newOverrides = await getOverridesRemote();
     if (JSON.stringify(newOverrides) !== JSON.stringify(overrides)) {
       overrides = newOverrides;
+      runSimulation();
       showLocalNotification('🔄 Calendario actualizado remotamente');
       render();
     }
   } catch (e) { }
 });
 
-// --- LÓGICA SMART SWAP ---
-async function saveOverride(dateString, newPersonId) {
+async function saveOverride(dateString, personId) {
   try {
-    const targetDate = new Date(dateString + 'T00:00:00');
+    // En este algoritmo definitivo, el override es SAGRADO (Regla 6).
+    // No hacemos swap automático, simplemente respetamos la voluntad del usuario.
+    // El sistema se re-simulará alrededor de este cambio.
+    const newPerson = TEAM.find(p => p.id === personId);
 
-    // 1. Identificar quién está ACTUALMENTE en el día objetivo (antes del cambio)
-    const currentPerson = getHomeOfficePerson(targetDate);
-    const currentPersonId = currentPerson ? currentPerson.id : null;
-    const currentPersonName = currentPerson ? currentPerson.name : 'Nadie';
+    await saveOverrideRemote(dateString, personId);
+    overrides[dateString] = personId;
 
-    // 2. Identificar si la NUEVA persona ya tiene un día asignado esta semana
-    // Buscamos conflicto en la semana DE LA FECHA OBJETIVO (no de la vista actual)
-    const weekDays = getWeekDaysForLogic(targetDate);
+    runSimulation(); // RECALCULAR TODO EL FUTURO BASADO EN ESTE CAMBIO
+    render();
 
-    let conflictDateStr = null;
-    let conflictDayName = '';
-
-    for (const d of weekDays) {
-      // Ignoramos el día objetivo (por si estamos re-guardando lo mismo)
-      if (d.dateStr === dateString) continue;
-
-      // Verificamos quién tiene este día
-      const p = getHomeOfficePerson(d.date);
-      if (p && p.id === newPersonId) {
-        conflictDateStr = d.dateStr;
-        conflictDayName = DAYS_ES[d.date.getDay()];
-        break;
-      }
+    if (newPerson) {
+      showLocalNotification(`Cambio guardado: ${newPerson.name}`);
     }
-
-    const newPersonObj = TEAM.find(p => p.id === newPersonId);
-
-    if (conflictDateStr && currentPersonId) {
-      // --- CASO DE INTERCAMBIO (SWAP) ---
-      // El nuevo dueño (newPersonId) ya tiene un día (conflictDateStr).
-      // El dueño actual (currentPersonId) va a perder targetDate.
-      // SOLUCIÓN: currentPersonId se queda con conflictDateStr.
-
-      // 1. Asignar targetDate a newPersonId
-      await saveOverrideRemote(dateString, newPersonId);
-      overrides[dateString] = newPersonId;
-
-      // 2. Asignar conflictDateStr a currentPersonId
-      await saveOverrideRemote(conflictDateStr, currentPersonId);
-      overrides[conflictDateStr] = currentPersonId;
-
-      render();
-      showLocalNotification(`🔀 Enroque: ${newPersonObj.name} toma el día de ${currentPersonName}, y ${currentPersonName} pasa al ${conflictDayName}.`);
-
-    } else {
-      // --- CASO SIMPLE ---
-      // No hay conflicto o no se puede hacer swap (ej: target estaba vacío).
-      await saveOverrideRemote(dateString, newPersonId);
-      overrides[dateString] = newPersonId;
-      render();
-      showLocalNotification(`Cambio guardado: ${newPersonObj.name}`);
-    }
-
   } catch (e) {
-    showLocalNotification('Error al guardar cambio');
+    showLocalNotification('❌ Error al guardar');
     console.error(e);
   }
 }
@@ -120,10 +82,10 @@ function showLocalNotification(msg) {
     position: 'fixed', bottom: '80px', left: '50%', transform: 'translateX(-50%)',
     background: 'var(--palm)', color: 'var(--sand)', padding: '12px 24px',
     borderRadius: '50px', boxShadow: '0 4px 12px var(--shadow)', zIndex: '10000',
-    fontSize: '0.9rem', fontWeight: '600', textAlign: 'center', minWidth: '320px'
+    fontSize: '0.9rem', fontWeight: '600', textAlign: 'center', minWidth: '300px'
   });
   document.body.appendChild(toast);
-  setTimeout(() => toast.remove(), 5000); // Un poco más de tiempo para leer el enroque
+  setTimeout(() => toast.remove(), 4000);
 }
 
 function toggleDarkMode() {
@@ -133,75 +95,199 @@ function toggleDarkMode() {
   render();
 }
 
-// ==========================================
-// === LÓGICA DE NEGOCIO SIMPLE (REVERT) ===
-// ==========================================
-
 function isWorkingDay(date) {
   const day = date.getDay();
   if (day === 0 || day === 6) return false;
   return !isHoliday(date);
 }
 
-// Cálculo de días hábiles desde START_DATE
-function getWorkingDayIndex(date) {
-  let count = 0;
+// ==========================================
+// === ALGORITMO DEFINITIVO (6 REGLAS) ===
+// ==========================================
+
+function runSimulation() {
+  simulationCache = {};
+
+  // Estado Inicial
+  let state = {
+    monthlyCounts: {},      // Regla 1 (Equidad)
+    weeklyCounts: {},       // Regla 2 (Límite Semanal)
+    pendingFridayUser: null,// Regla 3 (Continuidad)
+    lastAssignedIndex: TEAM.length - 1,
+    currentMonth: -1,
+    currentWeekStr: ''
+  };
+
+  // Iniciar contadores
+  TEAM.forEach(p => state.monthlyCounts[p.id] = 0);
+
+  // Rango de Simulación (2 años)
+  const endDate = new Date(START_DATE);
+  endDate.setFullYear(endDate.getFullYear() + 2);
+
   let d = new Date(START_DATE);
   d.setHours(0, 0, 0, 0);
 
-  const target = new Date(date);
-  target.setHours(0, 0, 0, 0);
+  while (d <= endDate) {
+    const dateStr = d.toISOString().split('T')[0];
+    const month = d.getMonth();
 
-  if (target < d) return -1; // Antes del inicio
+    // Identificador de Semana (Lunes a Domingo)
+    // Usamos algo simple: Inicio de semana
+    const weekStart = new Date(d);
+    const dayOfWeek = weekStart.getDay();
+    const diffToMon = weekStart.getDate() - dayOfWeek + (dayOfWeek === 0 ? -6 : 1);
+    weekStart.setDate(diffToMon);
+    const weekStr = weekStart.toISOString().split('T')[0];
 
-  while (d < target) {
-    if (isWorkingDay(d)) {
-      count++;
+    // --- GESTIÓN DE ESTADO TEMPORAL ---
+
+    // 1. Cambio de Mes -> Reiniciar contadores mensuales
+    if (month !== state.currentMonth) {
+      TEAM.forEach(p => state.monthlyCounts[p.id] = 0);
+      state.currentMonth = month;
     }
+
+    // 2. Cambio de Semana -> Reiniciar contadores semanales
+    if (weekStr !== state.currentWeekStr) {
+      state.weeklyCounts = {};
+      TEAM.forEach(p => state.weeklyCounts[p.id] = 0);
+      state.currentWeekStr = weekStr;
+    }
+
+    // --- DECISIÓN DE ASIGNACIÓN (Solo días hábiles) ---
+    if (isWorkingDay(d)) {
+      let assignedPerson = null;
+
+      // REGLA 6: OVERRIDES SON SAGRADOS
+      if (overrides[dateStr]) {
+        assignedPerson = TEAM.find(p => p.id === overrides[dateStr]);
+
+        // Efectos colaterales del override:
+        // Si alguien tomó este día a la fuerza, hay que actualizar el estado
+        // para que el sistema "sepa" que ya gastó su cartucho semanal/mensual.
+      } else {
+        // --- SELECCIÓN AUTOMÁTICA ---
+
+        // Candidatos
+        let candidates = [];
+
+        // A. Prioridad: Continuidad (Regla 3)
+        if (state.pendingFridayUser) {
+          candidates.push(state.pendingFridayUser);
+        }
+
+        // B. Rotación Natural (Fallback)
+        // Buscamos el siguiente en la lista que NO sea el pending (para no duplicar)
+        // O simplemente el siguiente lógico
+        let nextIndex = (state.lastAssignedIndex + 1) % TEAM.length;
+        candidates.push(TEAM[nextIndex]);
+
+        // C. Equidad Forzada (Regla 5 - Adaptación)
+        // Si estamos a fin de mes (día > 21), añadimos a los más necesitados
+        if (d.getDate() > 21) {
+          const minCount = Math.min(...Object.values(state.monthlyCounts));
+          const needy = TEAM.filter(t => state.monthlyCounts[t.id] === minCount);
+          // Los ponemos AL PRINCIPIO de la lista de candidatos
+          candidates = [...needy, ...candidates];
+        }
+
+        // --- FILTRADO DE CANDIDATOS (REGLAS RESTRICTIVAS) ---
+
+        for (const candidate of candidates) {
+          if (!candidate) continue;
+
+          // REGLA 2: Límite Semanal (Estricta)
+          // Si ya tiene 1 día esta semana, DESCARTADO.
+          if (state.weeklyCounts[candidate.id] >= 1) continue;
+
+          // REGLA 1: Equidad (Suave) - Evitar disparar la diferencia > 1
+          // Calculamos cómo quedaría
+          const currentMin = Math.min(...Object.values(state.monthlyCounts));
+          const currentMax = Math.max(...Object.values(state.monthlyCounts));
+
+          // Si asignarle a este hace que (SuCount + 1) - Min > 1, intentamos evitarlo
+          // Salvo que sea fin de mes y sea mandatario llenar huecos
+          // O salvo que sea el único candidato disponible
+          const projectedCount = state.monthlyCounts[candidate.id] + 1;
+          if ((projectedCount - currentMin) > 1 && d.getDate() <= 21) {
+            // Intentamos saltarlo si hay otro candidato
+            continue;
+          }
+
+          // Si pasa los filtros, es EL ELEGIDO
+          assignedPerson = candidate;
+          break;
+        }
+
+        // --- FALLBACK DE EMERGENCIA ---
+        // Si todos los candidatos fueron filtrados (ej: todos tienen 1 día esta semana)
+        // Debemos relajar la Regla 2? NO, el usuario dijo "ningún usuario tiene más de un HO a la semana".
+        // Entonces, si todos tienen 1, NADIE tiene HO hoy? -> Imposible, hay 5 días y 5 personas.
+        // Matemáticamente siempre debería haber alguien libre si son 5 y 5.
+        // Pero si hay feriados, la semana es corta.
+        // Si la semana tiene 3 días hábiles, sobran 2 personas.
+        // Si nadie cumple, buscamos a CUALQUIERA que cumpla Regla 2 (Semanal)
+        if (!assignedPerson) {
+          assignedPerson = TEAM.find(p => state.weeklyCounts[p.id] === 0);
+        }
+
+        // Si AÚN así nadie puede (ej: semana de 6 días? imposible),
+        // rompemos la Regla 2 para asegurar cobertura (Regla Implícita: Alguien tiene que estar).
+        if (!assignedPerson) {
+          // Agarramos al que menos tiene en el mes
+          const minMonthly = Math.min(...Object.values(state.monthlyCounts));
+          assignedPerson = TEAM.find(p => state.monthlyCounts[p.id] === minMonthly);
+        }
+      }
+
+      // --- CONFIRMACIÓN Y ACTUALIZACIÓN DE ESTADO ---
+      if (assignedPerson) {
+        simulationCache[dateStr] = assignedPerson.id;
+
+        state.monthlyCounts[assignedPerson.id]++;
+        state.weeklyCounts[assignedPerson.id]++;
+
+        // Actualizar último asignado para rotación
+        state.lastAssignedIndex = TEAM.findIndex(p => p.id === assignedPerson.id);
+
+        // Gestión de Viernes (Regla 3)
+        if (d.getDay() === 5) { // Viernes
+          state.pendingFridayUser = assignedPerson;
+        } else {
+          // Si asignamos Lunes (o Martes post-feriado), consumimos la prioridad
+          // PERO solo si la persona asignada ERA la pendiente.
+          if (state.pendingFridayUser && state.pendingFridayUser.id === assignedPerson.id) {
+            state.pendingFridayUser = null;
+          }
+          // Si el asignado NO era el pendiente (ej: override), el pendiente sigue esperando su turno?
+          // La regla "Usuario del Viernes vuelve el Lunes" implica continuidad inmediata.
+          // Si el Lunes hay override, se rompe la cadena.
+          else if (state.pendingFridayUser && overrides[dateStr]) {
+            state.pendingFridayUser = null; // Se rompió la cadena por fuerza mayor
+          }
+          // Si fue un día normal (Martes, Miercoles), no tocamos el pendiente 
+          // (aunque el pendiente solo debería sobrevivir al fin de semana/feriado lunes)
+          // Limpiamos pendiente si ya pasó su oportunidad (lunes/martes)
+          if (d.getDay() > 2) state.pendingFridayUser = null;
+        }
+      }
+    }
+
+    // Avanzar día
     d.setDate(d.getDate() + 1);
   }
-  return count;
-}
-
-function getHomeOfficePersonBase(date) {
-  if (date < START_DATE) return null;
-  if (!isWorkingDay(date)) return null;
-
-  const idx = getWorkingDayIndex(date);
-  if (idx === -1) return null;
-
-  // ROTACIÓN SIMPLE: (Index) % 5
-  // Orden: Machi(0), Fabi(1), Gaston(2), Romi(3), Aldo(4)
-  return TEAM[idx % TEAM.length];
 }
 
 function getHomeOfficePerson(date) {
   const dateStr = date.toISOString().split('T')[0];
+  if (date < START_DATE) return null;
+  if (!isWorkingDay(date)) return null;
 
-  if (overrides && overrides[dateStr]) {
-    return TEAM.find(p => p.id === overrides[dateStr]);
-  }
-  return getHomeOfficePersonBase(date);
-}
+  if (Object.keys(simulationCache).length === 0) runSimulation();
 
-// Helper para lógica de semana (independiente de la vista)
-function getWeekDaysForLogic(date) {
-  const start = new Date(date);
-  start.setHours(0, 0, 0, 0);
-  const day = start.getDay();
-  const diff = start.getDate() - day + (day === 0 ? -6 : 1); // Lunes
-  start.setDate(diff);
-
-  const days = [];
-  for (let i = 0; i < 5; i++) { // Solo Lun-Vie
-    const d = new Date(start);
-    d.setDate(start.getDate() + i);
-    days.push({
-      date: d,
-      dateStr: d.toISOString().split('T')[0]
-    });
-  }
-  return days;
+  const personId = simulationCache[dateStr];
+  return personId ? TEAM.find(p => p.id === personId) : null;
 }
 
 
