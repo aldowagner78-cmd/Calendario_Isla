@@ -199,12 +199,20 @@ function goToToday() {
 async function verifyAdmin() {
   if (isAdmin) return true;
 
-  const pin = prompt("🔒 Modo Admin\nIngresa el PIN de seguridad:");
-  // PIN Hardcodeado simple para Aldo. 
-  if (pin === '1234') {
+  // Gatekeeper: Preguntar si es Aldo antes de pedir PIN
+  const intent = confirm("🔒 Esta acción es solo para Aldo.\n\n¿Sos Aldo? (Aceptar para ingresar PIN, Cancelar para volver)");
+
+  if (!intent) {
+    showLocalNotification("⛔ Pide el cambio a Aldo");
+    return false;
+  }
+
+  const pin = prompt("Ingresa el PIN de seguridad:");
+
+  if (pin === '6352') { // PIN Nuevo
     isAdmin = true;
     localStorage.setItem('isla_bonita_admin', 'true');
-    showLocalNotification('🔓 Modo Admin Activado');
+    showLocalNotification('🔓 Modo Admin Activado (Guardado)');
     return true;
   } else {
     alert("PIN Incorrecto");

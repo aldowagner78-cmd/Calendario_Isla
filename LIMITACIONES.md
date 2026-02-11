@@ -9,7 +9,7 @@
 Para cumplir con tu pedido de "solo yo puedo hacer cambios", he implementado un sistema de **PIN simplificado**:
 *   **Solo lectura para todos:** Cualquiera puede VER el calendario.
 *   **Edición protegida:** Si alguien intenta tocar un día para cambiarlo, se le pedirá un PIN.
-*   **Tu PIN:** `1234` (Una vez ingresado, el dispositivo queda "autorizado" como Admin y no lo pide más, a menos que borres datos).
+*   **Tu PIN:** `6352` (Una vez ingresado, el dispositivo queda "autorizado" como Admin y no lo pide más, a menos que borres datos).
 
 ## 3. Notificaciones 🔔
 *   **Locales:** Cuando haces un cambio, te confirma con un mensaje visual (Toast).
