@@ -1,63 +1,110 @@
-// Lista de feriados inamovibles y trasladables de Argentina 2026 (Estimados)
-// Formato YYYY-MM-DD
-export const HOLIDAYS_2026 = [
-    // Enero
-    '2026-01-01', // Año Nuevo
+// --- FERIADOS ARGENTINA (Lógica Perpetua) ---
 
-    // Febrero (Carnaval - Estimado)
-    '2026-02-16', // Lunes de Carnaval (Est)
-    '2026-02-17', // Martes de Carnaval (Est)
-
-    // Marzo
-    '2026-03-24', // Día de la Memoria
-
-    // Abril
-    '2026-04-02', // Malvinas
-    '2026-04-03', // Viernes Santo
-
-    // Mayo
-    '2026-05-01', // Día del Trabajador
-    '2026-05-25', // Revolución de Mayo
-
-    // Junio
-    '2026-06-17', // Paso a la Inmortalidad de Güemes (Podría variar)
-    '2026-06-20', // Belgrano / Bandera
-
-    // Julio
-    '2026-07-09', // Independencia
-
-    // Agosto
-    '2026-08-17', // San Martín (Probable que sea trasladado)
-
-    // Octubre
-    '2026-10-12', // Diversidad Cultural (Probable que sea trasladado)
-
-    // Noviembre
-    '2026-11-20', // Soberanía Nacional
-
-    // Diciembre
-    '2026-12-08', // Inmaculada Concepción
-    '2026-12-25', // Navidad
+// Feriados Inamovibles (Día-Mes)
+// Vamos a usar DD-MM para la lista de entrada y convertir internamente a YYYY-MM-DD
+const FIXED_HOLIDAYS_DDMM = [
+    '01-01', // Año Nuevo
+    '24-03', // Día de la Memoria
+    '02-04', // Malvinas
+    '01-05', // Día del Trabajador
+    '25-05', // Revolución de Mayo
+    '20-06', // Belgrano / Bandera
+    '09-07', // Independencia
+    '08-12', // Inmaculada Concepción
+    '25-12', // Navidad
 ];
 
-// Lista de cumpleaños del equipo (Formato ignorando el año para facilitar la lógica si se extiende)
-// Pero mantendremos el formato YYYY-MM-DD para 2026 por consistencia
-export const BIRTHDAYS_2026 = {
-    '2026-10-22': 'Aldo',   // 22/10
-    '2026-06-25': 'Gaston', // 25/06
-    '2026-01-28': 'Machi',  // 28/01
-    '2026-07-25': 'Fabi',   // 25/07 (Antes Profesor)
-    '2026-12-01': 'Romi'    // 01/12
+// Cumpleaños (Día-Mes) - Nombre
+// DD-MM
+const BIRTHDAYS_DDMM = {
+    '22-10': 'Aldo',
+    '25-06': 'Gaston',
+    '28-01': 'Machi',
+    '25-07': 'Fabi',
+    '01-12': 'Romi'
 };
 
-// Función helper para chequear feriados
-export function isHoliday(date) {
-    const dateStr = date.toISOString().split('T')[0];
-    return HOLIDAYS_2026.includes(dateStr);
+// Algoritmo para calcular Pascua (Meeus/Jones/Butcher) - Devuelve objeto Date
+function getEasterDate(year) {
+    const a = year % 19;
+    const b = Math.floor(year / 100);
+    const c = year % 100;
+    const d = Math.floor(b / 4);
+    const e = b % 4;
+    const f = Math.floor((b + 8) / 25);
+    const g = Math.floor((b - f + 1) / 3);
+    const h = (19 * a + b - d - g + 15) % 30;
+    const i = Math.floor(c / 4);
+    const k = c % 4;
+    const l = (32 + 2 * e + 2 * i - h - k) % 7;
+    const m = Math.floor((a + 11 * h + 22 * l) / 451);
+    const month = Math.floor((h + l - 7 * m + 114) / 31);
+    const day = ((h + l - 7 * m + 114) % 31) + 1;
+    return new Date(year, month - 1, day);
 }
 
-// Función helper para chequear cumpleaños
-export function getBirthday(date) {
+// Cache de feriados por año para no recalcular siempre
+const holidaysCache = {};
+
+function getHolidaysSetForYear(year) {
+    if (holidaysCache[year]) return holidaysCache[year];
+
+    const holidays = new Set();
+
+    // 1. Feriados Fijos
+    FIXED_HOLIDAYS_DDMM.forEach(dayMonth => {
+        const [day, month] = dayMonth.split('-');
+        // Formato ISO: YYYY-MM-DD
+        holidays.add(`${year}-${month}-${day}`);
+    });
+
+    // 2. Feriados Variables calculados (Pascua y Carnaval)
+    const easter = getEasterDate(year);
+
+    // Viernes Santo (Easter - 2 días)
+    const goodFriday = new Date(easter.getTime());
+    goodFriday.setDate(easter.getDate() - 2);
+    holidays.add(goodFriday.toISOString().split('T')[0]);
+
+    // Carnaval Lunes y Martes (Easter - 48 y - 47 días)
+    // Lunes
+    const carnivalMon = new Date(easter.getTime());
+    carnivalMon.setDate(easter.getDate() - 48);
+    holidays.add(carnivalMon.toISOString().split('T')[0]);
+
+    // Martes
+    const carnivalTue = new Date(easter.getTime());
+    carnivalTue.setDate(easter.getDate() - 47);
+    holidays.add(carnivalTue.toISOString().split('T')[0]);
+
+    // Feriados trasladables 'fijos' (San Martín 17/8, Diversidad 12/10, Soberanía 20/11)
+    // Dejamos fijos por ahora DD-MM
+    [
+        '17-08', // San Martín
+        '12-10', // Diversidad
+        '20-11'  // Soberanía
+    ].forEach(dayMonth => {
+        const [day, month] = dayMonth.split('-');
+        holidays.add(`${year}-${month}-${day}`);
+    });
+
+    holidaysCache[year] = holidays;
+    return holidays;
+}
+
+export function isHoliday(date) {
+    const year = date.getFullYear();
+    const holidaysSet = getHolidaysSetForYear(year);
     const dateStr = date.toISOString().split('T')[0];
-    return BIRTHDAYS_2026[dateStr] || null;
+    return holidaysSet.has(dateStr);
+}
+
+
+export function getBirthday(date) {
+    // Formato DD-MM
+    const day = date.getDate().toString().padStart(2, '0');
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const key = `${day}-${month}`;
+
+    return BIRTHDAYS_DDMM[key] || null;
 }

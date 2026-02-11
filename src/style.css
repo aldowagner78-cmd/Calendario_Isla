@@ -210,7 +210,16 @@ h1 {
 
 .big-card {
   padding: 20px;
-  align-items: flex-start;
+  align-items: center;
+  /* Centrar verticalmente */
+}
+
+.big-card .card-content {
+  display: flex;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .big-card .icon-box {
@@ -255,6 +264,8 @@ h1 {
   font-weight: 600;
   letter-spacing: 1px;
   margin-bottom: 0px;
+  white-space: nowrap;
+  /* Evitar que se rompa */
 }
 
 .card .card-content .name-big {
@@ -263,9 +274,9 @@ h1 {
   color: var(--palm);
   line-height: 1;
   letter-spacing: -1px;
-  margin-top: 5px;
-  display: block;
-  /* Asegurar bloque para evitar problemas inline */
+  margin-top: 0px;
+  /* Quitar margen superior */
+  display: inline-block;
 }
 
 /* Holiday Style */
