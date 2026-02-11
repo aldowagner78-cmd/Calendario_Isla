@@ -37,25 +37,21 @@ function isWorkingDay(date) {
   return !isHoliday(date);
 }
 
-// Calcula cuántos días hábiles pasaron desde el inicio hasta la fecha dada
-function getWorkingDayIndex(targetDate) {
-  let count = 0;
-  let currentDate = new Date(START_DATE);
+// Calcula el número de semana calendario desde START_DATE (que es un Lunes)
+function getWeekNumber(date) {
+  const start = new Date(START_DATE);
+  start.setHours(0, 0, 0, 0);
 
-  // Normalizar fechas a medianoche
-  currentDate.setHours(0, 0, 0, 0);
-  const target = new Date(targetDate);
+  const target = new Date(date);
   target.setHours(0, 0, 0, 0);
 
-  if (target < currentDate) return -1;
+  // Obtener el Lunes de la semana del target
+  const dow = target.getDay();
+  const mondayOfTarget = new Date(target);
+  mondayOfTarget.setDate(target.getDate() - (dow === 0 ? 6 : dow - 1));
 
-  while (currentDate < target) {
-    if (isWorkingDay(currentDate)) {
-      count++;
-    }
-    currentDate.setDate(currentDate.getDate() + 1);
-  }
-  return count;
+  const diffMs = mondayOfTarget.getTime() - start.getTime();
+  return Math.round(diffMs / (7 * 24 * 60 * 60 * 1000));
 }
 
 function getHomeOfficePerson(date) {
@@ -69,13 +65,12 @@ function getHomeOfficePerson(date) {
   // 2. Revisar si es fin de semana o feriado
   if (!isWorkingDay(date)) return null;
 
-  // 3. Calcular rotación con desplazamiento semanal
-  // Cada ciclo de 5 días hábiles, el orden se desplaza 1 posición hacia atrás
-  // Así el que tuvo Viernes pasa a Lunes la semana siguiente
-  const workingDayIndex = getWorkingDayIndex(date);
-  const cycle = Math.floor(workingDayIndex / 5);
-  const positionInCycle = workingDayIndex % 5;
-  const personIndex = ((positionInCycle - cycle) % 5 + 5) % 5;
+  // 3. Rotación basada en SEMANA CALENDARIO (no en conteo de días hábiles)
+  // Cada semana el patrón se desplaza 1 posición: el de Viernes pasa a Lunes
+  // Esto GARANTIZA que nadie se repite dentro de la misma semana
+  const weekNum = getWeekNumber(date);
+  const dayIndex = date.getDay() - 1; // Lun=0, Mar=1, Mie=2, Jue=3, Vie=4
+  const personIndex = ((dayIndex - weekNum) % 5 + 5) % 5;
 
   return TEAM[personIndex];
 }
