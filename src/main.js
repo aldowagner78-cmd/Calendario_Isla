@@ -66,7 +66,7 @@ function render() {
   app.innerHTML = `
     <header>
       <div class="logo-container">
-        <img src="/logo.svg" alt="Isla Bonita">
+        <img src="logo.svg" alt="Isla Bonita">
       </div>
       <div>
         <h1>Isla Bonita</h1>
@@ -200,7 +200,7 @@ render();
 // Registro de Service Worker
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js')
+    navigator.serviceWorker.register('sw.js')
       .then(reg => console.log('SW registrado', reg))
       .catch(err => console.log('SW error', err));
   });

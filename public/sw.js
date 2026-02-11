@@ -1,9 +1,9 @@
 const CACHE_NAME = 'isla-bonita-v1';
 const ASSETS = [
-    '/',
-    '/index.html',
-    '/logo.svg',
-    '/manifest.json'
+    './',
+    'index.html',
+    'logo.svg',
+    'manifest.json'
 ];
 
 self.addEventListener('install', (event) => {
