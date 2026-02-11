@@ -1,0 +1,19 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <circle cx="256" cy="256" r="240" fill="#FDFCF0"/>
+  <!-- Beach -->
+  <path d="M72 380C140 360 220 390 300 370C380 350 440 370 440 370V440H72V380Z" fill="#E9E5D6"/>
+  <!-- Sea/Turquoise detail -->
+  <path d="M440 370C380 350 300 370 220 390C140 410 72 380 72 380L72 400C72 400 140 430 220 410C300 390 380 410 440 390V370Z" fill="#64C4BC" fill-opacity="0.3"/>
+  <!-- Palm Tree Trunk -->
+  <path d="M220 380C225 330 235 280 260 230" stroke="#5D4037" stroke-width="12" stroke-linecap="round"/>
+  <!-- Palm Leaves -->
+  <g stroke="#2D5A27" stroke-width="10" stroke-linecap="round">
+    <path d="M260 230C230 220 200 230 180 250"/>
+    <path d="M260 230C235 205 210 195 185 195"/>
+    <path d="M260 230C265 200 280 180 310 175"/>
+    <path d="M260 230C290 220 320 230 340 250"/>
+    <path d="M260 230C285 205 310 195 335 205"/>
+  </g>
+  <!-- Sun -->
+  <circle cx="340" cy="140" r="35" fill="#FFD700" fill-opacity="0.8"/>
+</svg>

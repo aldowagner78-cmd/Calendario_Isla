@@ -1,0 +1,28 @@
+{
+  "name": "Isla Bonita - Home Office",
+  "short_name": "Isla Bonita",
+  "description": "Gestión de Home Office rotativo para equipos.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#FDFCF0",
+  "theme_color": "#2D5A27",
+  "icons": [
+    {
+      "src": "logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "logo.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "logo.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}
