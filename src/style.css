@@ -257,13 +257,15 @@ h1 {
   margin-bottom: 0px;
 }
 
-.name-big {
-  font-size: 3.5rem;
+.card .card-content .name-big {
+  font-size: 3.5rem !important;
   font-weight: 800;
   color: var(--palm);
   line-height: 1;
   letter-spacing: -1px;
   margin-top: 5px;
+  display: block;
+  /* Asegurar bloque para evitar problemas inline */
 }
 
 /* Holiday Style */
