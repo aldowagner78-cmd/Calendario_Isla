@@ -75,7 +75,7 @@ function isWorkingDay(date) {
   return !isHoliday(date);
 }
 
-// ========== SIMULACIÓN (copia EXACTA del nuevo main.js runSimulation v19) ==========
+// ========== SIMULACIÓN (copia EXACTA del nuevo main.js runSimulation v20) ==========
 function runSimulationCurrent(overrides = {}, yearsToSimulate = 5) {
   const simulationCache = {};
 
@@ -83,7 +83,7 @@ function runSimulationCurrent(overrides = {}, yearsToSimulate = 5) {
     monthlyCounts: {},
     weeklyCounts: {},
     pendingFridayUser: null,
-    lastAssignedIndex: TEAM.length - 1,
+    weekNumber: 0,
     currentMonth: -1,
     currentYear: -1,
     currentWeekStr: ''
@@ -118,52 +118,67 @@ function runSimulationCurrent(overrides = {}, yearsToSimulate = 5) {
       state.weeklyCounts = {};
       TEAM.forEach(p => state.weeklyCounts[p.id] = 0);
       state.currentWeekStr = weekStr;
+      state.weekNumber++;
     }
 
     if (isWorkingDay(d)) {
       let assignedPerson = null;
 
-      // REGLA 1: OVERRIDES SAGRADOS
       if (overrides[dateStr]) {
         assignedPerson = TEAM.find(p => p.id === overrides[dateStr]);
       } else {
-        // REGLA 2: Pool de elegibles
         const eligible = TEAM.filter(p => state.weeklyCounts[p.id] < 1);
 
         if (eligible.length > 0) {
-          const nextIdx = (state.lastAssignedIndex + 1) % TEAM.length;
+          const weekOffset = (state.weekNumber * 3 + d.getDay()) % TEAM.length;
 
-          // REGLA 3: CONTINUIDAD (equidad siempre prioridad)
+          // ¿Semana completa? (días hábiles restantes >= elegibles)
+          let remainingWorkDays = 0;
+          for (let wd = d.getDay(); wd <= 5; wd++) {
+            const checkDate = new Date(d);
+            checkDate.setDate(d.getDate() + (wd - d.getDay()));
+            if (checkDate.getMonth() === month && isWorkingDay(checkDate)) {
+              remainingWorkDays++;
+            }
+          }
+          const isFullWeek = remainingWorkDays >= eligible.length;
+
+          // REGLA 3: CONTINUIDAD
           if (state.pendingFridayUser && eligible.some(p => p.id === state.pendingFridayUser.id)) {
-            const minCount = Math.min(...eligible.map(p => state.monthlyCounts[p.id]));
-            if (state.monthlyCounts[state.pendingFridayUser.id] <= minCount) {
+            if (isFullWeek) {
               assignedPerson = state.pendingFridayUser;
+            } else {
+              const minCount = Math.min(...eligible.map(p => state.monthlyCounts[p.id]));
+              if (state.monthlyCounts[state.pendingFridayUser.id] <= minCount) {
+                assignedPerson = state.pendingFridayUser;
+              }
             }
           }
 
           if (!assignedPerson) {
-            // REGLAS 4 y 6: EQUIDAD + ROTACIÓN
+            // Semana completa: ROTACIÓN PURA
+            // Semana parcial: EQUIDAD + rotación desempate
             const sorted = [...eligible].sort((a, b) => {
-              const diff = state.monthlyCounts[a.id] - state.monthlyCounts[b.id];
-              if (diff !== 0) return diff;
+              if (!isFullWeek) {
+                const diff = state.monthlyCounts[a.id] - state.monthlyCounts[b.id];
+                if (diff !== 0) return diff;
+              }
               const aIdx = TEAM.findIndex(t => t.id === a.id);
               const bIdx = TEAM.findIndex(t => t.id === b.id);
-              const aDist = (aIdx - nextIdx + TEAM.length) % TEAM.length;
-              const bDist = (bIdx - nextIdx + TEAM.length) % TEAM.length;
-              return aDist - bDist;
+              const aRot = (aIdx - weekOffset + TEAM.length) % TEAM.length;
+              const bRot = (bIdx - weekOffset + TEAM.length) % TEAM.length;
+              return aRot - bRot;
             });
 
             assignedPerson = sorted[0];
           }
         }
-        // eligible vacío → no asignación (Regla 2 absoluta)
       }
 
       if (assignedPerson) {
         simulationCache[dateStr] = assignedPerson.id;
         state.monthlyCounts[assignedPerson.id]++;
         state.weeklyCounts[assignedPerson.id]++;
-        state.lastAssignedIndex = TEAM.findIndex(p => p.id === assignedPerson.id);
 
         if (d.getDay() === 5) {
           state.pendingFridayUser = assignedPerson;
@@ -367,10 +382,38 @@ if (badMonths === 0 && warnMonths === 0) {
   console.log('✅ Todos los meses tienen diferencia ≤ 1\n');
 } else if (badMonths === 0) {
   console.log(`\n⚠️  ${warnMonths} meses con dif=2 (estructural: Regla 3 mata equidad + feriados)\n`);
-  console.log('   Nota: diff=2 es inevitable cuando continuidad Vie→Lun colisiona');
-  console.log('   con feriados en semanas parciales. Regla 3 > Regla 4 por diseño.\n');
 } else {
   console.log(`\n❌ ${badMonths} meses con dif > 2 (BUG REAL)\n`);
+}
+
+// --- VARIEDAD DE DÍAS ---
+console.log('--- VARIEDAD DE DÍAS (no siempre el mismo día de la semana) ---');
+const DAYS = ['Dom','Lun','Mar','Mie','Jue','Vie','Sab'];
+const personMonthDays = {}; // personId -> monthStr -> Set of weekdays
+const entries2 = Object.entries(cache).sort(([a],[b]) => a.localeCompare(b));
+for (const [dateStr, personId] of entries2) {
+  const dt = new Date(dateStr + 'T00:00:00');
+  const monthStr = dateStr.substring(0, 7);
+  const dayName = DAYS[dt.getDay()];
+  const key = `${personId}-${monthStr}`;
+  if (!personMonthDays[key]) personMonthDays[key] = { days: new Set(), count: 0 };
+  personMonthDays[key].days.add(dayName);
+  personMonthDays[key].count++;
+}
+let stuckCount = 0;
+for (const [key, val] of Object.entries(personMonthDays)) {
+  if (val.count >= 3 && val.days.size === 1) {
+    const [pid, month] = key.split('-', 2);
+    const mStr = key.substring(key.indexOf('-') + 1);
+    const person = TEAM.find(t => t.id === parseInt(pid));
+    console.log(`  ⚠️  ${person?.name} en ${mStr}: ${val.count} días, SIEMPRE ${[...val.days][0]}`);
+    stuckCount++;
+  }
+}
+if (stuckCount === 0) {
+  console.log('✅ Nadie tiene siempre el mismo día en ningún mes\n');
+} else {
+  console.log(`\n❌ ${stuckCount} casos de día fijo\n`);
 }
 
 // --- RESUMEN FINAL ---
@@ -382,6 +425,7 @@ console.log(`Sacrificios Regla 3 (equidad):   ${results.rule3_soft.length}`);
 console.log(`Violaciones Regla 5 (feriados):  ${results.rule5.length}`);
 console.log(`Meses con dif > 2 (BUG):         ${badMonths}/${results.monthlyStats.length}`);
 console.log(`Meses con dif = 2:               ${warnMonths}/${results.monthlyStats.length}`);
+console.log(`Personas con día fijo:           ${stuckCount}`);
 
-const allGood = results.rule2.length === 0 && results.rule5.length === 0 && badMonths === 0;
+const allGood = results.rule2.length === 0 && results.rule5.length === 0 && badMonths === 0 && stuckCount === 0;
 console.log(allGood ? '\n🎉 TODAS LAS REGLAS SE CUMPLEN' : '\n🔴 HAY VIOLACIONES - SE REQUIERE CORRECCIÓN');

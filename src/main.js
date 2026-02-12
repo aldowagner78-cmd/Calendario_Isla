@@ -100,7 +100,7 @@ function isWorkingDay(date) {
 }
 
 // ==========================================
-// === ALGORITMO DEFINITIVO (6 REGLAS - v19) ===
+// === ALGORITMO DEFINITIVO (6 REGLAS - v20) ===
 // ==========================================
 
 function runSimulation() {
@@ -110,7 +110,7 @@ function runSimulation() {
     monthlyCounts: {},       // Regla 4/6 (Equidad)
     weeklyCounts: {},        // Regla 2 (Límite Semanal)
     pendingFridayUser: null, // Regla 3 (Continuidad Vie→Lun)
-    lastAssignedIndex: TEAM.length - 1,
+    weekNumber: 0,           // Contador de semanas para rotar el orden
     currentMonth: -1,
     currentYear: -1,
     currentWeekStr: ''
@@ -144,11 +144,12 @@ function runSimulation() {
       state.currentYear = year;
     }
 
-    // Cambio de Semana → Reiniciar contadores semanales
+    // Cambio de Semana → Reiniciar contadores semanales + avanzar rotación
     if (weekStr !== state.currentWeekStr) {
       state.weeklyCounts = {};
       TEAM.forEach(p => state.weeklyCounts[p.id] = 0);
       state.currentWeekStr = weekStr;
+      state.weekNumber++;
     }
 
     // Solo días hábiles (Regla 5: feriados son días muertos)
@@ -168,40 +169,56 @@ function runSimulation() {
         const eligible = TEAM.filter(p => state.weeklyCounts[p.id] < 1);
 
         if (eligible.length > 0) {
-          const nextIdx = (state.lastAssignedIndex + 1) % TEAM.length;
+          // Offset de rotación: combina semana + día para máxima variedad
+          const weekOffset = (state.weekNumber * 3 + d.getDay()) % TEAM.length;
+
+          // ═══════════════════════════════════════════════════════
+          // ¿SEMANA COMPLETA? Si los días hábiles restantes en esta
+          // semana (dentro del mismo mes) >= elegibles, TODOS van a
+          // recibir 1 día → equidad automática → rotación pura.
+          // ═══════════════════════════════════════════════════════
+          let remainingWorkDays = 0;
+          for (let wd = d.getDay(); wd <= 5; wd++) {
+            const checkDate = new Date(d);
+            checkDate.setDate(d.getDate() + (wd - d.getDay()));
+            if (checkDate.getMonth() === month && isWorkingDay(checkDate)) {
+              remainingWorkDays++;
+            }
+          }
+          const isFullWeek = remainingWorkDays >= eligible.length;
 
           // ═══════════════════════════════════════════════
           // REGLA 3: CONTINUIDAD (Vie→Lun) 🔗
-          // Preferencia, pero NUNCA a costa de equidad.
-          // Solo aplica si la persona tiene conteo <= mínimo.
+          // Semana completa: siempre aplica (equidad automática)
+          // Semana parcial: solo si persona está en el mínimo
           // ═══════════════════════════════════════════════
           if (state.pendingFridayUser && eligible.some(p => p.id === state.pendingFridayUser.id)) {
-            const minCount = Math.min(...eligible.map(p => state.monthlyCounts[p.id]));
-            if (state.monthlyCounts[state.pendingFridayUser.id] <= minCount) {
+            if (isFullWeek) {
               assignedPerson = state.pendingFridayUser;
+            } else {
+              const minCount = Math.min(...eligible.map(p => state.monthlyCounts[p.id]));
+              if (state.monthlyCounts[state.pendingFridayUser.id] <= minCount) {
+                assignedPerson = state.pendingFridayUser;
+              }
             }
           }
 
           if (!assignedPerson) {
-            // ═══════════════════════════════════════════════════
-            // REGLAS 4 y 6: EQUIDAD + ROTACIÓN ⚖️🌊
-            // Siempre priorizar menor conteo mensual.
-            // Rotación solo como desempate cuando cuentas iguales.
-            // Días 1-20: equidad suave (mantiene patrón natural)
-            // Días 21+: equidad forzada (prioridad absoluta)
-            // ═══════════════════════════════════════════════════
-            const nextIdx = (state.lastAssignedIndex + 1) % TEAM.length;
-
+            // ═══════════════════════════════════════════════════════
+            // ASIGNACIÓN ⚖️🔄
+            // Semana completa: ROTACIÓN PURA (equidad garantizada)
+            // Semana parcial: EQUIDAD ESTRICTA + rotación desempate
+            // ═══════════════════════════════════════════════════════
             const sorted = [...eligible].sort((a, b) => {
-              // Primero: menor conteo mensual
-              const diff = state.monthlyCounts[a.id] - state.monthlyCounts[b.id];
-              if (diff !== 0) return diff;
-              // Desempate: proximidad en rotación
+              if (!isFullWeek) {
+                const diff = state.monthlyCounts[a.id] - state.monthlyCounts[b.id];
+                if (diff !== 0) return diff;
+              }
               const aIdx = TEAM.findIndex(t => t.id === a.id);
               const bIdx = TEAM.findIndex(t => t.id === b.id);
-              const aDist = (aIdx - nextIdx + TEAM.length) % TEAM.length;
-              const bDist = (bIdx - nextIdx + TEAM.length) % TEAM.length;
-              return aDist - bDist;
+              const aRot = (aIdx - weekOffset + TEAM.length) % TEAM.length;
+              const bRot = (bIdx - weekOffset + TEAM.length) % TEAM.length;
+              return aRot - bRot;
             });
 
             assignedPerson = sorted[0];
@@ -217,7 +234,6 @@ function runSimulation() {
         simulationCache[dateStr] = assignedPerson.id;
         state.monthlyCounts[assignedPerson.id]++;
         state.weeklyCounts[assignedPerson.id]++;
-        state.lastAssignedIndex = TEAM.findIndex(p => p.id === assignedPerson.id);
 
         // Regla 3: Registrar viernes para continuidad
         if (d.getDay() === 5) {
